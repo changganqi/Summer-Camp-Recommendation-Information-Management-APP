@@ -1,0 +1,7 @@
+﻿*
+!.gitignore
+!README.md
+!docs/
+!docs/*.png
+!release/
+!release/SummerCampPlannerSetup.exe

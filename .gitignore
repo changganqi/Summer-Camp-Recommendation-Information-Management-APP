@@ -3,5 +3,6 @@
 !README.md
 !docs/
 !docs/*.png
+!docs/*.md
 !release/
 !release/SummerCampPlannerSetup.exe

@@ -19,7 +19,7 @@
 
 ## 下载
 
-- Windows 安装包：[SummerCampPlannerSetup.exe](https://github.com/changganqi/Summer-Camp-Recommendation-Information-Management-APP/releases/download/v1.0.1/SummerCampPlannerSetup.exe)
+- Windows 安装包：[SummerCampPlannerSetup.exe](https://github.com/changganqi/Summer-Camp-Recommendation-Information-Management-APP/releases/download/v1.0.2/SummerCampPlannerSetup.exe)
 - macOS 安装包：[SummerCampPlanner-macOS.dmg](https://github.com/changganqi/Summer-Camp-Recommendation-Information-Management-APP/releases/download/v1.0.1-mac/SummerCampPlanner-macOS.dmg)
 
 ## 界面预览

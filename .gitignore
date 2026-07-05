@@ -4,4 +4,6 @@
 !docs/
 !docs/*.png
 !docs/*.md
+!source/
+!source/**
 release/

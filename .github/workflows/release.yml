@@ -1,0 +1,98 @@
+name: Build release installers
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+    inputs:
+      release_tag:
+        description: "Release tag, for example v1.0.4"
+        required: true
+        default: "v1.0.4"
+
+permissions:
+  contents: write
+
+env:
+  RELEASE_TAG: ${{ github.event_name == 'workflow_dispatch' && inputs.release_tag || github.ref_name }}
+  PYTHONUTF8: "1"
+
+jobs:
+  create-release:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Create or update release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ env.RELEASE_TAG }}
+          name: 夏令营日程助手 ${{ env.RELEASE_TAG }}
+          body: |
+            夏令营日程助手 ${{ env.RELEASE_TAG }} 安装包。
+
+            - Windows：下载 `SummerCampPlannerSetup.exe`
+            - macOS：下载 `SummerCampPlanner-macOS.dmg`
+          draft: false
+          prerelease: false
+
+  build-windows:
+    needs: create-release
+    runs-on: windows-2022
+    defaults:
+      run:
+        working-directory: source
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install pyinstaller playwright certifi
+          python -m playwright install chromium
+
+      - name: Build Windows installer
+        run: python -X utf8 build_release.py
+
+      - name: Upload Windows installer
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ env.RELEASE_TAG }}
+          files: source/release/SummerCampPlannerSetup.exe
+          overwrite_files: true
+
+  build-macos:
+    needs: create-release
+    runs-on: macos-14
+    defaults:
+      run:
+        working-directory: source
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install pyinstaller playwright certifi
+          python -m playwright install chromium
+
+      - name: Build macOS DMG
+        run: python -X utf8 build_macos.py
+
+      - name: Upload macOS DMG
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ env.RELEASE_TAG }}
+          files: source/release-macos/SummerCampPlanner-macOS.dmg
+          overwrite_files: true

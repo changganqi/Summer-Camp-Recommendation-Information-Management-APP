@@ -10,6 +10,7 @@ import platform
 import re
 import socket
 import subprocess
+import time as time_module
 import urllib.request
 from ctypes import wintypes
 from datetime import date, datetime, time, timedelta, timezone
@@ -39,6 +40,13 @@ NTP_SERVERS_CN = [
     "time.edu.cn",
     "cn.pool.ntp.org",
 ]
+NTP_SERVERS_REGIONAL = [
+    "hk.pool.ntp.org",
+    "sg.pool.ntp.org",
+    "jp.pool.ntp.org",
+    "asia.pool.ntp.org",
+    "time.apple.com",
+]
 NTP_SERVERS_GLOBAL = [
     "time.windows.com",
     "time.cloudflare.com",
@@ -56,6 +64,18 @@ TIME_URLS_CN = [
     "https://www.baidu.com",
     "https://www.qq.com",
 ]
+TIME_URLS_REGIONAL = [
+    "http://www.bing.com",
+    "https://www.bing.com",
+    "https://www.microsoft.com",
+    "https://www.apple.com.cn",
+    "https://www.apple.com/hk/",
+    "https://www.hko.gov.hk/",
+    "https://www.gov.hk/",
+    "https://www.cloudflare.com",
+    "https://www.iana.org",
+    "https://github.com",
+]
 TIME_URLS_GLOBAL = [
     "http://www.msftconnecttest.com/connecttest.txt",
     "http://www.gstatic.com/generate_204",
@@ -63,17 +83,6 @@ TIME_URLS_GLOBAL = [
     "http://www.cloudflare.com",
     "https://www.microsoft.com",
 ]
-TIME_API_URLS = [
-    "https://api.m.taobao.com/rest/api3.do?api=mtop.common.getTimestamp",
-    "http://api.m.taobao.com/rest/api3.do?api=mtop.common.getTimestamp",
-    "https://acs.m.taobao.com/gw/mtop.common.getTimestamp/",
-    "http://acs.m.taobao.com/gw/mtop.common.getTimestamp/",
-    "https://f.m.suning.com/api/ct.do",
-    "https://quan.suning.com/getSysTime.do",
-    "http://quan.suning.com/getSysTime.do",
-]
-
-
 class DATA_BLOB(ctypes.Structure):
     _fields_ = [
         ("cbData", wintypes.DWORD),
@@ -273,72 +282,7 @@ def _fetch_http_datetime(url: str, timeout: float = 4.0) -> datetime:
     raise RuntimeError(str(last_error or "无法读取 Date 头"))
 
 
-def _fetch_time_api_datetime(url: str, timeout: float = 4.0) -> datetime:
-    request = urllib.request.Request(url, headers={"User-Agent": "SummerCampPlanner/1.0"})
-    with urllib.request.urlopen(request, timeout=timeout) as response:
-        raw = response.read(4096)
-    text = raw.decode("utf-8", errors="ignore")
-
-    def parse_candidate(candidate: object) -> datetime | None:
-        clean = str(candidate or "").strip()
-        if not clean:
-            return None
-        match = re.search(r"(20\d{2})[-/年](\d{1,2})[-/月](\d{1,2})日?[ T](\d{1,2}):(\d{1,2}):(\d{1,2})", clean)
-        if match:
-            y, m, d, hh, mm, ss = [int(part) for part in match.groups()]
-            return datetime(y, m, d, hh, mm, ss, tzinfo=timezone(timedelta(hours=8))).astimezone(timezone.utc)
-        for digits in re.findall(r"\d{13,}", clean):
-            timestamp = int(digits[:13]) / 1000
-            if timestamp >= 946684800:
-                return datetime.fromtimestamp(timestamp, tz=timezone.utc)
-        for digits in re.findall(r"(?<!\d)\d{10}(?!\d)", clean):
-            timestamp = int(digits)
-            if timestamp >= 946684800:
-                return datetime.fromtimestamp(timestamp, tz=timezone.utc)
-        digits = re.sub(r"\D", "", clean)
-        if len(digits) >= 14 and digits.startswith("20"):
-            return datetime(
-                int(digits[:4]),
-                int(digits[4:6]),
-                int(digits[6:8]),
-                int(digits[8:10]),
-                int(digits[10:12]),
-                int(digits[12:14]),
-                tzinfo=timezone(timedelta(hours=8)),
-            ).astimezone(timezone.utc)
-        return None
-
-    parsed = parse_candidate(text)
-    if parsed is not None:
-        return parsed
-
-    json_text = text.strip()
-    if not json_text.startswith(("{", "[")):
-        match = re.search(r"[\w.$]+\((.*)\)\s*;?\s*$", json_text, re.S)
-        if match:
-            json_text = match.group(1).strip()
-    data = json.loads(json_text)
-    candidates: list[object] = []
-
-    def walk(value: object) -> None:
-        if isinstance(value, dict):
-            for child in value.values():
-                walk(child)
-        elif isinstance(value, list):
-            for child in value:
-                walk(child)
-        elif isinstance(value, (str, int, float)):
-            candidates.append(value)
-
-    walk(data)
-    for candidate in candidates:
-        parsed = parse_candidate(candidate)
-        if parsed is not None:
-            return parsed
-    raise RuntimeError("时间 API 没有返回可解析时间")
-
-
-def fetch_network_datetime(timeout: int = 6) -> datetime:
+def fetch_network_datetime(timeout: int = 6, attempts: int = 3) -> datetime:
     errors: list[str] = []
     ntp_timeout = max(1.5, min(float(timeout), 3.0))
     http_timeout = max(2.0, min(float(timeout), 5.0))
@@ -364,7 +308,9 @@ def fetch_network_datetime(timeout: int = 6) -> datetime:
                 for future in concurrent.futures.as_completed(future_map, timeout=deadline):
                     label = future_map[future]
                     try:
-                        result = future.result()
+                        result = future.result().astimezone(timezone.utc)
+                        if result.year < 2024 or result.year > 2045:
+                            raise RuntimeError(f"时间异常：{result.isoformat()}")
                     except Exception as exc:
                         errors.append(f"{label}: {exc}")
                     else:
@@ -378,21 +324,32 @@ def fetch_network_datetime(timeout: int = 6) -> datetime:
             executor.shutdown(wait=False, cancel_futures=True)
         return None
 
-    primary = (
-        [("api", url) for url in TIME_API_URLS]
-        + [("http", url) for url in TIME_URLS_CN]
+    mixed = (
+        [("http", url) for url in TIME_URLS_CN]
+        + [("http", url) for url in TIME_URLS_REGIONAL]
+        + [("http", url) for url in TIME_URLS_GLOBAL]
         + [("ntp", server) for server in NTP_SERVERS_CN]
+        + [("ntp", server) for server in NTP_SERVERS_REGIONAL]
+        + [("ntp", server) for server in NTP_SERVERS_GLOBAL]
     )
-    result = collect(primary)
-    if result is not None:
-        return result
+    fallback = (
+        [("http", url) for url in TIME_URLS_GLOBAL]
+        + [("http", url) for url in TIME_URLS_REGIONAL]
+        + [("ntp", server) for server in NTP_SERVERS_GLOBAL]
+        + [("ntp", server) for server in NTP_SERVERS_REGIONAL]
+    )
+    total_attempts = max(1, int(attempts or 1))
+    for attempt_no in range(1, total_attempts + 1):
+        result = collect(mixed)
+        if result is not None:
+            return result
+        result = collect(fallback)
+        if result is not None:
+            return result
+        if attempt_no < total_attempts:
+            time_module.sleep(0.5 * attempt_no)
 
-    fallback = [("http", url) for url in TIME_URLS_GLOBAL] + [("ntp", server) for server in NTP_SERVERS_GLOBAL]
-    result = collect(fallback)
-    if result is not None:
-        return result
-
-    raise RuntimeError("无法联网校对时间，请检查网络后重试。\n\n" + "\n".join(errors[-3:]))
+    raise RuntimeError("无法联网校对时间，请检查网络后重试。\n\n" + "\n".join(errors[-6:]))
 
 
 def fetch_network_date(timeout: int = 6) -> date:

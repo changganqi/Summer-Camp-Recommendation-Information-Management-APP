@@ -1,11 +1,11 @@
 from __future__ import annotations
 
 import os
-import winreg
 import shutil
 import subprocess
 import sys
 import tkinter as tk
+import winreg
 from pathlib import Path
 from tkinter import filedialog, messagebox, ttk
 
@@ -14,7 +14,7 @@ from license_keys import activate_license, fetch_network_datetime, validate_key_
 
 APP_NAME = "夏令营日程助手"
 APP_PUBLISHER = "夏令营日程助手"
-APP_VERSION = "1.0.2"
+APP_VERSION = "1.0.4"
 APP_REG_KEY = r"Software\Microsoft\Windows\CurrentVersion\Uninstall\SummerCampPlanner"
 INSTALL_FOLDER_NAME = "夏令营日程助手"
 INSTALL_MARKER_NAME = ".summer_camp_planner_install"
@@ -34,6 +34,30 @@ INSTALL_DIR_DATA_NAMES = {
     "user_data",
     "__pycache__",
 }
+_SINGLE_INSTANCE_HANDLES: list[object] = []
+
+
+def acquire_single_instance(name: str) -> bool:
+    if sys.platform != "win32":
+        return True
+    try:
+        import ctypes
+        from ctypes import wintypes
+
+        kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+        kernel32.CreateMutexW.argtypes = (wintypes.LPVOID, wintypes.BOOL, wintypes.LPCWSTR)
+        kernel32.CreateMutexW.restype = wintypes.HANDLE
+        kernel32.CloseHandle.argtypes = (wintypes.HANDLE,)
+        handle = kernel32.CreateMutexW(None, False, name)
+        if not handle:
+            return True
+        if ctypes.get_last_error() == 183:
+            kernel32.CloseHandle(handle)
+            return False
+        _SINGLE_INSTANCE_HANDLES.append(handle)
+    except Exception:
+        return True
+    return True
 
 
 def resource_dir() -> Path:
@@ -91,15 +115,36 @@ def validate_installed_runtime(install_dir: Path) -> None:
         raise RuntimeError("运行库文件安装失败，可能被安全软件拦截或安装目录残缺。请重新安装，仍然失败请换一个安装目录。")
 
 
+def hidden_subprocess_kwargs() -> dict:
+    if sys.platform != "win32":
+        return {}
+    startupinfo = subprocess.STARTUPINFO()
+    startupinfo.dwFlags |= subprocess.STARTF_USESHOWWINDOW
+    startupinfo.wShowWindow = 0
+    return {
+        "startupinfo": startupinfo,
+        "creationflags": subprocess.CREATE_NO_WINDOW,
+    }
+
+
 def create_shortcut(target: Path, shortcut: Path) -> None:
+    shortcut_text = str(shortcut).replace("'", "''")
+    target_text = str(target).replace("'", "''")
+    workdir_text = str(target.parent).replace("'", "''")
     ps = (
         "$WshShell = New-Object -comObject WScript.Shell; "
-        f"$Shortcut = $WshShell.CreateShortcut('{shortcut}'); "
-        f"$Shortcut.TargetPath = '{target}'; "
-        f"$Shortcut.WorkingDirectory = '{target.parent}'; "
+        f"$Shortcut = $WshShell.CreateShortcut('{shortcut_text}'); "
+        f"$Shortcut.TargetPath = '{target_text}'; "
+        f"$Shortcut.WorkingDirectory = '{workdir_text}'; "
         "$Shortcut.Save()"
     )
-    subprocess.run(["powershell", "-NoProfile", "-ExecutionPolicy", "Bypass", "-Command", ps], check=False)
+    subprocess.run(
+        ["powershell", "-NoProfile", "-ExecutionPolicy", "Bypass", "-WindowStyle", "Hidden", "-Command", ps],
+        check=False,
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+        **hidden_subprocess_kwargs(),
+    )
 
 
 def folder_size_mb(path: Path) -> int:
@@ -182,35 +227,39 @@ class Installer(tk.Tk):
         if path:
             self.path_var.set(path)
 
+    def reset_after_failure(self) -> None:
+        self.progress.configure(value=0)
+        self.status_var.set("需要打赏获得密钥，请联系作者闲鱼用户名：满天星的")
+        self.set_installing(False)
+
     def install(self) -> None:
         if self.installing:
             return
         key = self.key_var.get().strip()
         target = resolve_install_dir(self.path_var.get())
         self.set_installing(True)
-        self.set_progress(8, "正在安装，请稍候...")
+        self.set_progress(8, "正在联网校对时间...")
         try:
             network_now = fetch_network_datetime()
-        except Exception:
-            messagebox.showerror("安装失败", "密钥无效或已过期，请检查网络后重试；仍然失败请联系作者。", parent=self)
-            self.progress.configure(value=0)
-            self.status_var.set("需要打赏获得密钥，请联系作者闲鱼用户名：满天星的")
-            self.set_installing(False)
+        except Exception as exc:
+            messagebox.showerror(
+                "安装失败",
+                "无法联网校对时间，请检查网络或切换/关闭 VPN 后重试。\n\n"
+                f"{str(exc)[:800]}",
+                parent=self,
+            )
+            self.reset_after_failure()
             return
         ok, message = validate_key_for_install(key, install_dir=target, check_time=True, network_now=network_now)
         if not ok:
-            messagebox.showerror("安装失败", "密钥无效或已过期，请检查网络后重试；仍然失败请联系作者。", parent=self)
-            self.progress.configure(value=0)
-            self.status_var.set("需要打赏获得密钥，请联系作者闲鱼用户名：满天星的")
-            self.set_installing(False)
+            messagebox.showerror("安装失败", message, parent=self)
+            self.reset_after_failure()
             return
         self.set_progress(28, "正在安装，请稍候...")
         source = resource_dir() / "app_bundle"
         if not source.exists():
             messagebox.showerror("安装失败", "安装包缺少 app_bundle。", parent=self)
-            self.progress.configure(value=0)
-            self.status_var.set("需要打赏获得密钥，请联系作者闲鱼用户名：满天星的")
-            self.set_installing(False)
+            self.reset_after_failure()
             return
         try:
             self.set_progress(45, "正在安装，请稍候...")
@@ -228,6 +277,7 @@ class Installer(tk.Tk):
                 else:
                     shutil.copy2(item, dest)
                 self.set_progress(45 + int(index / total * 25), "正在安装，请稍候...")
+
             uninstaller = resource_dir() / "uninstall_app.exe"
             if uninstaller.exists():
                 shutil.copy2(uninstaller, target / UNINSTALL_EXE_NAME)
@@ -240,20 +290,16 @@ class Installer(tk.Tk):
                 source_exe.rename(app_exe)
             validate_installed_runtime(target)
 
-            self.set_progress(78, "正在安装，请稍候...")
+            self.set_progress(78, "正在写入授权...")
             ok, message = activate_license(key, install_dir=target, check_time=True, network_now=network_now)
             if not ok:
-                messagebox.showerror("安装失败", "密钥无效或已过期，请检查网络后重试；仍然失败请联系作者。", parent=self)
-                self.progress.configure(value=0)
-                self.status_var.set("需要打赏获得密钥，请联系作者闲鱼用户名：满天星的")
-                self.set_installing(False)
+                messagebox.showerror("安装失败", message, parent=self)
+                self.reset_after_failure()
                 return
             ok, message = validate_saved_license(install_dir=target, check_time=True, network_now=network_now)
             if not ok:
                 messagebox.showerror("安装失败", "安装未完成，请重新运行安装程序；仍然失败请联系作者。", parent=self)
-                self.progress.configure(value=0)
-                self.status_var.set("需要打赏获得密钥，请联系作者闲鱼用户名：满天星的")
-                self.set_installing(False)
+                self.reset_after_failure()
                 return
 
             exe = target / APP_EXE_NAME
@@ -263,12 +309,11 @@ class Installer(tk.Tk):
             self.set_progress(100, "安装完成，即将关闭...")
         except Exception as exc:
             messagebox.showerror("安装失败", str(exc), parent=self)
-            self.progress.configure(value=0)
-            self.status_var.set("需要打赏获得密钥，请联系作者闲鱼用户名：满天星的")
-            self.set_installing(False)
+            self.reset_after_failure()
             return
         self.after(900, self.destroy)
 
 
 if __name__ == "__main__":
-    Installer().mainloop()
+    if acquire_single_instance("Local\\SummerCampPlanner-Installer"):
+        Installer().mainloop()

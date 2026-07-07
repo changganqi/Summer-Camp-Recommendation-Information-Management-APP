@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import subprocess
 import shutil
 import sys
 import tkinter as tk
@@ -16,6 +17,30 @@ INSTALL_FOLDER_NAMES = {"夏令营日程助手", "SummerCampPlanner"}
 INSTALL_MARKER_NAME = ".summer_camp_planner_install"
 APP_EXE_NAMES = {"夏令营日程助手.exe", "SummerCampPlanner.exe"}
 UNINSTALL_EXE_NAME = "卸载夏令营日程助手.exe"
+_SINGLE_INSTANCE_HANDLES: list[object] = []
+
+
+def acquire_single_instance(name: str) -> bool:
+    if sys.platform != "win32":
+        return True
+    try:
+        import ctypes
+        from ctypes import wintypes
+
+        kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+        kernel32.CreateMutexW.argtypes = (wintypes.LPVOID, wintypes.BOOL, wintypes.LPCWSTR)
+        kernel32.CreateMutexW.restype = wintypes.HANDLE
+        kernel32.CloseHandle.argtypes = (wintypes.HANDLE,)
+        handle = kernel32.CreateMutexW(None, False, name)
+        if not handle:
+            return True
+        if ctypes.get_last_error() == 183:
+            kernel32.CloseHandle(handle)
+            return False
+        _SINGLE_INSTANCE_HANDLES.append(handle)
+    except Exception:
+        return True
+    return True
 
 
 def resource_dir() -> Path:
@@ -55,7 +80,21 @@ def apply_app_icon(window: tk.Misc) -> None:
             pass
 
 
+def hidden_subprocess_kwargs() -> dict:
+    if sys.platform != "win32":
+        return {}
+    startupinfo = subprocess.STARTUPINFO()
+    startupinfo.dwFlags |= subprocess.STARTF_USESHOWWINDOW
+    startupinfo.wShowWindow = 0
+    return {
+        "startupinfo": startupinfo,
+        "creationflags": subprocess.CREATE_NO_WINDOW,
+    }
+
+
 def main() -> None:
+    if not acquire_single_instance("Local\\SummerCampPlanner-Uninstaller"):
+        return
     root = tk.Tk()
     apply_app_icon(root)
     root.withdraw()
@@ -87,12 +126,17 @@ def main() -> None:
         "@echo off\n"
         "ping 127.0.0.1 -n 2 > nul\n"
         f'rd /s /q "{data_dir}"\n'
-        f'rd /s /q "{install_dir}"\n',
+        f'rd /s /q "{install_dir}"\n'
+        'del "%~f0" > nul 2> nul\n',
         encoding="gbk",
     )
-    import subprocess
-
-    subprocess.Popen(["cmd", "/c", str(script)], close_fds=True)
+    subprocess.Popen(
+        ["cmd", "/c", str(script)],
+        close_fds=True,
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+        **hidden_subprocess_kwargs(),
+    )
     root.destroy()
 
 

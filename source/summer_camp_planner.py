@@ -44,6 +44,30 @@ if getattr(sys, "frozen", False):
 
 APP_NAME = "夏令营日程助手"
 BASE_DIR = Path(__file__).resolve().parent
+_SINGLE_INSTANCE_HANDLES: list[object] = []
+
+
+def acquire_single_instance(name: str) -> bool:
+    if sys.platform != "win32":
+        return True
+    try:
+        import ctypes
+        from ctypes import wintypes
+
+        kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+        kernel32.CreateMutexW.argtypes = (wintypes.LPVOID, wintypes.BOOL, wintypes.LPCWSTR)
+        kernel32.CreateMutexW.restype = wintypes.HANDLE
+        kernel32.CloseHandle.argtypes = (wintypes.HANDLE,)
+        handle = kernel32.CreateMutexW(None, False, name)
+        if not handle:
+            return True
+        if ctypes.get_last_error() == 183:
+            kernel32.CloseHandle(handle)
+            return False
+        _SINGLE_INSTANCE_HANDLES.append(handle)
+    except Exception:
+        return True
+    return True
 
 
 def resource_path(*parts: str) -> Path:
@@ -104,7 +128,7 @@ EDITABLE_FIELDS = [
 ]
 
 DATE_FIELDS = ["signup_start", "signup_end", "result_date", "camp_start", "camp_end"]
-STATUS_OPTIONS = ["待确认", "已报名", "已入营", "放弃/落选"]
+STATUS_OPTIONS = ["待确认", "已报名", "已入营", "已中选", "放弃/落选"]
 STATUS_ALIASES = {
     "待确认": "待确认",
     "待报名": "待确认",
@@ -114,12 +138,17 @@ STATUS_ALIASES = {
     "待公布": "已报名",
     "已入营": "已入营",
     "已结束": "已入营",
+    "已中选": "已中选",
+    "中选": "已中选",
+    "拟录取": "已中选",
+    "录取": "已中选",
+    "通过": "已中选",
     "未入营": "放弃/落选",
     "落选": "放弃/落选",
     "放弃": "放弃/落选",
     "放弃/落选": "放弃/落选",
 }
-STATUS_SORT_RANK = {"待确认": 0, "已报名": 0, "已入营": 0, "放弃/落选": 1}
+STATUS_SORT_RANK = {"待确认": 0, "已报名": 0, "已入营": 0, "已中选": 1, "放弃/落选": 2}
 PRIORITY_OPTIONS = ["普通", "关注"]
 PROJECT_TYPE_OPTIONS = ["硕士", "直博"]
 FORMAT_OPTIONS = ["待定", "线上", "线下", "线上或线下"]
@@ -985,6 +1014,10 @@ def status_sort_rank(value: str | None) -> int:
     return STATUS_SORT_RANK.get(normalize_status(value), 0)
 
 
+def is_archived_status(value: str | None) -> bool:
+    return normalize_status(value) in {"已中选", "放弃/落选"}
+
+
 def normalize_priority(value: str | None) -> str:
     text = safe_text(value).strip()
     if text in {"关注", "高", "重要"}:
@@ -1844,7 +1877,7 @@ def build_ai_prompt(text: str, source_url: str = "") -> str:
 13. notes 禁止写这些内容：申请条件长段落、申请材料清单、已填写进主字段的报名/公布/参营时间和地点、普通联系方式、普通截止日期、普通活动流程。用户需要细节会自己看原文。
 14. notes 只保留这些情况：时间含糊或冲突、还需在另一个系统/问卷/邮箱同步填写或确认、硕士字段借用了直博/通用信息、必须提前联系导师且会影响报名、其他非常特殊的风险。
 15. notes 中需要醒目标记的事项单独成行并以“【重点】”开头；普通提醒不用标重点。不要输出半截句子，不要复制长原文。
-16. status 只能填写：待确认、已报名、已入营、放弃/落选；新识别出的项目通常填“待确认”。
+16. status 只能填写：待确认、已报名、已入营、已中选、放弃/落选；新识别出的项目通常填“待确认”。如果原文明确拟录取、录取、优秀营员、中选或已获得后续资格，可填“已中选”。
 17. priority 只能填写：普通、关注；除非用户特别标记或文本明显非常重要，否则填“普通”。
 18. project_type 只能填写：硕士、直博。
 19. camp_format 必须且只能填写以下四个值之一：线上、线下、待定、线上或线下。
@@ -2408,8 +2441,9 @@ class SummerCampPlanner(tk.Tk):
         self.status_label.pack(side="right", padx=12)
         ttk.Button(action_box, text="个人信息", style="Toolbar.TButton", command=self.open_personal_profile).pack(side="right", padx=(8, 0))
         ttk.Button(action_box, text="导出日程", style="Toolbar.TButton", command=self.export_schedule).pack(side="right", padx=(8, 0))
-        ttk.Button(action_box, text="导出备份", style="Toolbar.TButton", command=self.export_full_backup).pack(side="right", padx=(8, 0))
-        ttk.Button(action_box, text="导入备份", style="Toolbar.TButton", command=self.import_backup).pack(side="right", padx=(8, 0))
+        ttk.Button(action_box, text="备份 ▾", style="Toolbar.TButton", command=self.show_backup_menu).pack(
+            side="right", padx=(8, 0)
+        )
         ttk.Button(action_box, text="新建", style="Toolbar.TButton", command=self.clear_form).pack(side="right", padx=(8, 0))
 
         paned = ttk.PanedWindow(self, orient="horizontal")
@@ -2433,6 +2467,28 @@ class SummerCampPlanner(tk.Tk):
         self._build_calendar(calendar_pane)
         self._build_tree(tree_pane)
         self._build_right_panel(right)
+
+    def show_backup_menu(self) -> None:
+        menu = tk.Menu(
+            self,
+            tearoff=False,
+            bg="#ffffff",
+            fg="#1f2937",
+            activebackground="#eaf2ff",
+            activeforeground="#10233f",
+            borderwidth=1,
+            relief="solid",
+            font=("Microsoft YaHei UI", 10),
+        )
+        menu.add_command(label="导出完整备份...", command=self.export_full_backup)
+        menu.add_separator()
+        menu.add_command(label="导入备份并覆盖当前数据...", command=self.import_backup)
+        try:
+            x = self.winfo_pointerx()
+            y = self.winfo_pointery()
+            menu.tk_popup(x, y)
+        finally:
+            menu.grab_release()
 
     def apply_initial_layout(self) -> None:
         if self._layout_initialized:
@@ -2689,6 +2745,7 @@ class SummerCampPlanner(tk.Tk):
         self.school_tree.tag_configure("focused", background="#fff7ed", foreground="#9a3412")
         self.school_tree.tag_configure("pending", background="#fef9c3", foreground="#854d0e")
         self.school_tree.tag_configure("followup", background="#fee2e2", foreground="#b91c1c")
+        self.school_tree.tag_configure("selected_success", background="#ecfdf5", foreground="#047857")
         self.school_tree.tag_configure("inactive", background="#f1f5f9", foreground="#64748b")
         self.bind_mousewheel(self.school_tree)
 
@@ -3063,7 +3120,7 @@ class SummerCampPlanner(tk.Tk):
 
         for camp in self.camps:
             status = normalize_status(camp.get("status"))
-            if status == "放弃/落选":
+            if is_archived_status(status):
                 continue
             signup_start = parse_iso_date(camp.get("signup_start"))
             signup_end = parse_iso_date(camp.get("signup_end"))
@@ -3087,13 +3144,13 @@ class SummerCampPlanner(tk.Tk):
             camp
             for camp in self.camps
             if int(camp.get("id") or 0) != int(exclude_id or 0)
-            and normalize_status(camp.get("status")) != "放弃/落选"
+            and not is_archived_status(camp.get("status"))
             and may_require_offline(camp)
         ]
         if data:
             candidate = data.copy()
             candidate["id"] = data.get("id") or 0
-            if normalize_status(candidate.get("status")) != "放弃/落选" and may_require_offline(candidate):
+            if not is_archived_status(candidate.get("status")) and may_require_offline(candidate):
                 camps.append(candidate)
         conflicts: dict[date, list[str]] = {}
         by_day: dict[date, list[str]] = {}
@@ -3117,7 +3174,7 @@ class SummerCampPlanner(tk.Tk):
         return conflicts
 
     def camp_conflicts_for_item(self, data: dict, exclude_id: int | None = None) -> dict[date, list[str]]:
-        if normalize_status(data.get("status")) == "放弃/落选":
+        if is_archived_status(data.get("status")):
             return {}
         if not may_require_offline(data):
             return {}
@@ -3133,7 +3190,7 @@ class SummerCampPlanner(tk.Tk):
         for camp in self.camps:
             if int(camp.get("id") or 0) == int(exclude_id or 0):
                 continue
-            if normalize_status(camp.get("status")) == "放弃/落选":
+            if is_archived_status(camp.get("status")):
                 continue
             if not may_require_offline(camp):
                 continue
@@ -3173,7 +3230,7 @@ class SummerCampPlanner(tk.Tk):
             names = [
                 self.camp_display_name(camp)
                 for camp in self.camps
-                if normalize_status(camp.get("status")) != "放弃/落选"
+                if not is_archived_status(camp.get("status"))
                 and parse_iso_date(camp.get(field)) == today
             ]
             if names:
@@ -3654,7 +3711,7 @@ class SummerCampPlanner(tk.Tk):
         self.refresh_school_list()
 
     def cycle_school_status_filter(self) -> None:
-        options = ["", "待确认", "已报名", "已入营", "放弃/落选"]
+        options = ["", "待确认", "已报名", "已入营", "已中选", "放弃/落选"]
         index = options.index(self.school_filter_status) if self.school_filter_status in options else 0
         self.school_filter_status = options[(index + 1) % len(options)]
         self.refresh_school_list()
@@ -3686,11 +3743,7 @@ class SummerCampPlanner(tk.Tk):
                 self.school_tree.delete(item)
             rows = sorted(
                 [camp for camp in self.camps if self.school_matches_filters(camp)],
-                key=lambda camp: (
-                    1 if normalize_status(camp.get("status")) == "放弃/落选" else 0,
-                    self.school_sort_date(camp) or date.max,
-                    self.camp_display_name(camp),
-                ),
+                key=self.school_sort_key,
             )
             for camp in rows:
                 status = normalize_status(camp.get("status"))
@@ -3698,6 +3751,8 @@ class SummerCampPlanner(tk.Tk):
                 tags = []
                 if followup_hint:
                     tags.append("followup")
+                elif status == "已中选":
+                    tags.append("selected_success")
                 elif status == "放弃/落选":
                     tags.append("inactive")
                 elif status == "待确认":
@@ -3728,15 +3783,19 @@ class SummerCampPlanner(tk.Tk):
         if status not in {"已报名", "已入营"}:
             return ""
         camp_start = parse_iso_date(camp.get("camp_start"))
-        camp_end = parse_iso_date(camp.get("camp_end"))
+        camp_end = parse_iso_date(camp.get("camp_end")) or camp_start
         result_day = parse_iso_date(camp.get("result_date"))
         signup_end = parse_iso_date(camp.get("signup_end"))
         if status == "已报名" and not result_day and signup_end and signup_end < today:
             return "补录公布"
+        if status == "已入营" and camp_end and camp_end < today:
+            return "补录结果"
+        if status == "已入营":
+            if camp_start or camp_end:
+                return ""
+            return "补录开营"
         if camp_start or camp_end:
             return ""
-        if status == "已入营":
-            return "补录开营"
         if result_day and result_day < today:
             return "补录开营"
         return ""
@@ -3748,25 +3807,41 @@ class SummerCampPlanner(tk.Tk):
                 return parsed
         return None
 
-    def school_sort_date(self, camp: dict, today: date | None = None) -> date | None:
+    def school_sort_key(self, camp: dict, today: date | None = None) -> tuple[int, date, str]:
         today = today or date.today()
-        signup_start = parse_iso_date(camp.get("signup_start"))
+        status = normalize_status(camp.get("status"))
         signup_end = parse_iso_date(camp.get("signup_end"))
         result_day = parse_iso_date(camp.get("result_date"))
         camp_start = parse_iso_date(camp.get("camp_start"))
         camp_end = parse_iso_date(camp.get("camp_end"))
-        signup_anchor = signup_start or signup_end
         camp_anchor = camp_start or camp_end
+        name = self.camp_display_name(camp)
 
-        if signup_end and signup_end >= today:
-            return signup_anchor or result_day or camp_anchor
-        if not signup_end and signup_start and signup_start >= today:
-            return signup_start
-        if result_day:
+        if status == "放弃/落选":
+            return (99, camp_anchor or result_day or signup_end or date.max, name)
+        if status == "已中选":
+            return (90, camp_anchor or result_day or signup_end or date.max, name)
+
+        if status == "待确认" and signup_end and signup_end >= today:
+            return (0, signup_end, name)
+        if status == "已报名" and signup_end and signup_end >= today:
+            return (1, signup_end, name)
+
+        if status == "已报名":
+            if not result_day:
+                return (2, date.min, name)
             if result_day >= today:
-                return result_day
-            return camp_anchor or result_day
-        return signup_anchor or camp_anchor
+                return (3, result_day, name)
+            if not camp_anchor:
+                return (4, date.min, name)
+            return (5, camp_anchor, name)
+
+        if status == "已入营":
+            if not camp_anchor:
+                return (6, date.min, name)
+            return (7, camp_anchor, name)
+
+        return (8, signup_end or result_day or camp_anchor or date.max, name)
 
     def on_school_tree_select(self, _event=None) -> None:
         if self._refreshing_school_tree or self.school_tree is None:
@@ -4485,10 +4560,11 @@ def run_self_test() -> None:
             assert split_date_range("2026年7月13日至15日") == ("2026-07-13", "2026-07-15")
             assert normalize_date_field_value('6月30日左右”，result_date提取为2026-06-30', 2026)[0] == "2026-06-30"
             assert normalize_status("待报名") == "待确认"
+            assert normalize_status("拟录取") == "已中选"
             assert normalize_camp_format("线下活动") == "线下"
             assert normalize_camp_format("腾讯会议线上宣讲") == "线上"
             assert normalize_camp_format("形式另行通知") == "待定"
-            assert status_sort_rank("放弃") > status_sort_rank("已报名")
+            assert status_sort_rank("放弃") > status_sort_rank("已中选") > status_sort_rank("已报名")
             assert EVENT_SORT_RANK["pending_signup"] < EVENT_SORT_RANK["signup"]
             assert EVENT_SORT_RANK["signup_deadline"] < EVENT_SORT_RANK["result"]
             today = date.today()
@@ -4521,6 +4597,48 @@ def run_self_test() -> None:
             )
             assert camp_items[0][0] == today + timedelta(days=8)
             assert camp_items[0][5] == today + timedelta(days=7)
+            assert SummerCampPlanner.school_followup_hint(
+                dummy_app,
+                {
+                    "status": "已入营",
+                    "camp_start": (today - timedelta(days=3)).isoformat(),
+                    "camp_end": (today - timedelta(days=1)).isoformat(),
+                },
+                today,
+            ) == "补录结果"
+            sort_rows = [
+                {
+                    "school": "B",
+                    "status": "已报名",
+                    "signup_end": (today + timedelta(days=3)).isoformat(),
+                },
+                {
+                    "school": "A",
+                    "status": "待确认",
+                    "signup_end": (today + timedelta(days=5)).isoformat(),
+                },
+                {
+                    "school": "C",
+                    "status": "已报名",
+                    "signup_end": (today - timedelta(days=1)).isoformat(),
+                    "result_date": (today + timedelta(days=2)).isoformat(),
+                },
+                {
+                    "school": "D",
+                    "status": "已中选",
+                    "camp_start": (today - timedelta(days=2)).isoformat(),
+                },
+                {
+                    "school": "E",
+                    "status": "放弃/落选",
+                    "camp_start": (today - timedelta(days=2)).isoformat(),
+                },
+            ]
+            sorted_names = [
+                row["school"]
+                for row in sorted(sort_rows, key=lambda row: SummerCampPlanner.school_sort_key(dummy_app, row, today))
+            ]
+            assert sorted_names == ["A", "B", "C", "D", "E"]
             parsed = extract_json_object('```json\n{"school":"四川大学","signup_end":"2026-07-03"}\n```')
             assert parsed["signup_end"] == "2026-07-03"
             text, links = html_to_text('<html><body><h1>通知</h1><a href="https://a.test">报名</a></body></html>')
@@ -4652,6 +4770,8 @@ def prompt_license_renewal(parent: tk.Tk, expired_message: str) -> bool:
 def main() -> None:
     if "--self-test" in sys.argv:
         run_self_test()
+        return
+    if not acquire_single_instance("Local\\SummerCampPlanner-App"):
         return
     ok, message = validate_saved_license()
     if not ok:

@@ -238,13 +238,13 @@ class Installer(tk.Tk):
         key = self.key_var.get().strip()
         target = resolve_install_dir(self.path_var.get())
         self.set_installing(True)
-        self.set_progress(8, "正在联网校对时间...")
+        self.set_progress(8, "正在连接服务器...")
         try:
             network_now = fetch_network_datetime()
         except Exception as exc:
             messagebox.showerror(
                 "安装失败",
-                "无法联网校对时间，请检查网络或切换/关闭 VPN 后重试。\n\n"
+                "无法连接服务器，请检查网络或切换/关闭 VPN 后重试。\n\n"
                 f"{str(exc)[:800]}",
                 parent=self,
             )

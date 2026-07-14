@@ -12,6 +12,8 @@
 
 - 记录学校、学院、报名号、报名时间、公布时间、开营时间、活动形式、地址、通知链接和备注。
 - 日历用颜色区分待确认、报名、报名截止、公布、开营等节点。
+- 支持多套界面主题，图片主题会铺满顶部和日历背景。
+- 日历会随窗口高度自适应，空间不足时以等分色块保留全部事件入口。
 - 项目列表会按接下来的时间排序，过期项目自动靠后，放弃/落选项目单独灰色显示。
 - 支持关注学校标记，关注项目会带星标，更容易从列表里扫出来。
 - 支持 AI 读取通知链接或通知正文，自动填入结构化字段。
@@ -19,8 +21,8 @@
 
 ## 下载
 
-- Windows 安装包：[SummerCampPlannerSetup.exe](https://github.com/changganqi/Summer-Camp-Recommendation-Information-Management-APP/releases/download/v1.0.4/SummerCampPlannerSetup.exe)
-- macOS 安装包：[SummerCampPlanner-macOS.dmg](https://github.com/changganqi/Summer-Camp-Recommendation-Information-Management-APP/releases/download/v1.0.4/SummerCampPlanner-macOS.dmg)
+- Windows 安装包：[SummerCampPlannerSetup.exe](https://github.com/changganqi/Summer-Camp-Recommendation-Information-Management-APP/releases/download/v1.1.0/SummerCampPlannerSetup.exe)
+- macOS 安装包：[SummerCampPlanner-macOS.dmg](https://github.com/changganqi/Summer-Camp-Recommendation-Information-Management-APP/releases/download/v1.1.0/SummerCampPlanner-macOS.dmg)
 
 ## 界面预览
 

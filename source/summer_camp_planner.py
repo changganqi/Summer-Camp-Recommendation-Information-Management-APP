@@ -34,6 +34,13 @@ from xml.sax.saxutils import escape as xml_escape
 from license_keys import activate_license, validate_saved_license
 
 try:
+    from PIL import Image, ImageOps, ImageTk
+except Exception:  # pragma: no cover - themed image headers are optional in source mode.
+    Image = None
+    ImageOps = None
+    ImageTk = None
+
+try:
     import certifi
 except Exception:  # pragma: no cover - certifi is optional in source mode.
     certifi = None
@@ -45,6 +52,147 @@ if getattr(sys, "frozen", False):
 APP_NAME = "夏令营日程助手"
 BASE_DIR = Path(__file__).resolve().parent
 _SINGLE_INSTANCE_HANDLES: list[object] = []
+
+THEME_ORDER = ("classic", "bright", "mist", "paper", "night")
+THEME_PALETTES = {
+    "classic": {
+        "name": "经典深蓝",
+        "APP_BG": "#eef3f8",
+        "WORKSPACE_BG": "#e2eaf2",
+        "GLASS_SURFACE": "#ffffff",
+        "GLASS_SURFACE_ALT": "#e6edf7",
+        "GLASS_HEADER": "#10233f",
+        "GLASS_BORDER": "#b8c6d4",
+        "GLASS_BORDER_STRONG": "#7f92a7",
+        "TEXT_PRIMARY": "#1f2937",
+        "TEXT_SECONDARY": "#64748b",
+        "ACCENT": "#2563eb",
+        "ACCENT_HOVER": "#1d4ed8",
+        "ACCENT_SOFT": "#dbeafe",
+        "TOOLBAR_GLASS": "#203a5f",
+        "TOOLBAR_GLASS_HOVER": "#2b4c79",
+        "TOOLBAR_GLASS_PRESSED": "#172f51",
+        "TOOLBAR_TEXT": "#ffffff",
+        "HEADER_TEXT": "#ffffff",
+        "HEADER_MUTED": "#c8d6e8",
+        "STATUS_BG": "#203a5f",
+        "STATUS_TEXT": "#dbeafe",
+        "HEADER_ASSET": "",
+    },
+    "bright": {
+        "name": "明亮白",
+        "APP_BG": "#ffffff",
+        "WORKSPACE_BG": "#edf1f2",
+        "GLASS_SURFACE": "#ffffff",
+        "GLASS_SURFACE_ALT": "#f0f3f4",
+        "GLASS_HEADER": "#ffffff",
+        "GLASS_BORDER": "#9eacb1",
+        "GLASS_BORDER_STRONG": "#74878e",
+        "TEXT_PRIMARY": "#1d2528",
+        "TEXT_SECONDARY": "#59686e",
+        "ACCENT": "#1f2d31",
+        "ACCENT_HOVER": "#304247",
+        "ACCENT_SOFT": "#d8ebe7",
+        "TOOLBAR_GLASS": "#f7f9fa",
+        "TOOLBAR_GLASS_HOVER": "#ffffff",
+        "TOOLBAR_GLASS_PRESSED": "#e0e7e9",
+        "TOOLBAR_TEXT": "#1d2528",
+        "HEADER_TEXT": "#1d2528",
+        "HEADER_MUTED": "#59686e",
+        "STATUS_BG": "#f1f4f5",
+        "STATUS_TEXT": "#34434a",
+        "HEADER_ASSET": "",
+    },
+    "mist": {
+        "name": "湖畔晨雾",
+        "APP_BG": "#f7faf9",
+        "WORKSPACE_BG": "#dfe9e7",
+        "GLASS_SURFACE": "#ffffff",
+        "GLASS_SURFACE_ALT": "#edf4f2",
+        "GLASS_HEADER": "#edf7f5",
+        "GLASS_BORDER": "#91a8a3",
+        "GLASS_BORDER_STRONG": "#687f7a",
+        "TEXT_PRIMARY": "#1f2d2a",
+        "TEXT_SECONDARY": "#5c706b",
+        "ACCENT": "#176b5b",
+        "ACCENT_HOVER": "#205f54",
+        "ACCENT_SOFT": "#d8eee8",
+        "TOOLBAR_GLASS": "#f7fbfa",
+        "TOOLBAR_GLASS_HOVER": "#ffffff",
+        "TOOLBAR_GLASS_PRESSED": "#dce9e6",
+        "TOOLBAR_TEXT": "#1f2d2a",
+        "HEADER_TEXT": "#17352f",
+        "HEADER_MUTED": "#496c64",
+        "STATUS_BG": "#e4f0ed",
+        "STATUS_TEXT": "#294a43",
+        "HEADER_ASSET": "theme_mist.png",
+    },
+    "paper": {
+        "name": "纸墨",
+        "APP_BG": "#fffdf8",
+        "WORKSPACE_BG": "#eee9df",
+        "GLASS_SURFACE": "#fffefa",
+        "GLASS_SURFACE_ALT": "#f3efe5",
+        "GLASS_HEADER": "#fbf7ee",
+        "GLASS_BORDER": "#a69d8d",
+        "GLASS_BORDER_STRONG": "#786e5f",
+        "TEXT_PRIMARY": "#2a2823",
+        "TEXT_SECONDARY": "#6f695f",
+        "ACCENT": "#3f5e4f",
+        "ACCENT_HOVER": "#4f6f60",
+        "ACCENT_SOFT": "#e1ebdf",
+        "TOOLBAR_GLASS": "#fffdf8",
+        "TOOLBAR_GLASS_HOVER": "#ffffff",
+        "TOOLBAR_GLASS_PRESSED": "#e9e3d8",
+        "TOOLBAR_TEXT": "#2a2823",
+        "HEADER_TEXT": "#2a2823",
+        "HEADER_MUTED": "#6f695f",
+        "STATUS_BG": "#f1ebdf",
+        "STATUS_TEXT": "#4c473f",
+        "HEADER_ASSET": "",
+    },
+    "night": {
+        "name": "深夜专注",
+        "APP_BG": "#f7f8fa",
+        "WORKSPACE_BG": "#dce2e8",
+        "GLASS_SURFACE": "#ffffff",
+        "GLASS_SURFACE_ALT": "#edf0f4",
+        "GLASS_HEADER": "#17222d",
+        "GLASS_BORDER": "#8998a7",
+        "GLASS_BORDER_STRONG": "#5f7282",
+        "TEXT_PRIMARY": "#1f2933",
+        "TEXT_SECONDARY": "#62707d",
+        "ACCENT": "#32648a",
+        "ACCENT_HOVER": "#3f779f",
+        "ACCENT_SOFT": "#dbe8f1",
+        "TOOLBAR_GLASS": "#243544",
+        "TOOLBAR_GLASS_HOVER": "#30485b",
+        "TOOLBAR_GLASS_PRESSED": "#192b39",
+        "TOOLBAR_TEXT": "#ffffff",
+        "HEADER_TEXT": "#ffffff",
+        "HEADER_MUTED": "#b8c7d4",
+        "STATUS_BG": "#243544",
+        "STATUS_TEXT": "#d9e6ef",
+        "HEADER_ASSET": "theme_night.png",
+    },
+}
+DEFAULT_THEME_KEY = "mist"
+ACTIVE_THEME_KEY = DEFAULT_THEME_KEY
+
+
+def activate_theme_palette(theme_key: str | None) -> str:
+    global ACTIVE_THEME_KEY
+    key = safe_text(theme_key) if "safe_text" in globals() else str(theme_key or "")
+    if key not in THEME_PALETTES:
+        key = DEFAULT_THEME_KEY
+    ACTIVE_THEME_KEY = key
+    for name, value in THEME_PALETTES[key].items():
+        if name != "name":
+            globals()[name] = value
+    return key
+
+
+activate_theme_palette(DEFAULT_THEME_KEY)
 
 
 def acquire_single_instance(name: str) -> bool:
@@ -83,6 +231,169 @@ def apply_app_icon(window: tk.Misc) -> None:
             window.iconbitmap(str(icon_path))
         except tk.TclError:
             pass
+
+
+def apply_windows_glass(window: tk.Misc) -> None:
+    """Ask Windows 11 for rounded corners and a native Mica backdrop."""
+    if sys.platform != "win32":
+        return
+    try:
+        import ctypes
+
+        window.update_idletasks()
+        hwnd = ctypes.windll.user32.GetParent(window.winfo_id()) or window.winfo_id()
+        dwm = ctypes.windll.dwmapi
+
+        def set_int(attribute: int, value: int) -> None:
+            data = ctypes.c_int(value)
+            dwm.DwmSetWindowAttribute(hwnd, attribute, ctypes.byref(data), ctypes.sizeof(data))
+
+        def colorref(value: str) -> int:
+            red, green, blue = (int(value[index : index + 2], 16) for index in (1, 3, 5))
+            return red | (green << 8) | (blue << 16)
+
+        set_int(20, 0)  # DWMWA_USE_IMMERSIVE_DARK_MODE
+        set_int(33, 2)  # DWMWA_WINDOW_CORNER_PREFERENCE: rounded
+        set_int(35, colorref(GLASS_HEADER))  # DWMWA_CAPTION_COLOR
+        set_int(36, colorref(HEADER_TEXT))  # DWMWA_TEXT_COLOR
+        set_int(38, 2)  # DWMWA_SYSTEMBACKDROP_TYPE: Mica
+    except Exception:
+        # Older Windows builds simply keep the matching opaque fallback colors.
+        pass
+
+
+class GlassButton(tk.Canvas):
+    """Compact rounded toolbar control with glass, hover, and focus states."""
+
+    def __init__(
+        self,
+        parent: tk.Misc,
+        text: str,
+        command,
+        width: int = 100,
+        height: int = 38,
+        primary: bool = False,
+    ) -> None:
+        super().__init__(
+            parent,
+            width=width,
+            height=height,
+            bg=GLASS_HEADER,
+            highlightthickness=0,
+            bd=0,
+            relief="flat",
+            cursor="hand2",
+            takefocus=True,
+        )
+        self._label = text
+        self._command = command
+        self._button_width = width
+        self._button_height = height
+        self._primary = primary
+        self._hovered = False
+        self._pressed = False
+        self._focused = False
+        self.bind("<Enter>", self._on_enter)
+        self.bind("<Leave>", self._on_leave)
+        self.bind("<ButtonPress-1>", self._on_press)
+        self.bind("<ButtonRelease-1>", self._on_release)
+        self.bind("<FocusIn>", self._on_focus_in)
+        self.bind("<FocusOut>", self._on_focus_out)
+        self.bind("<KeyRelease-space>", self._on_keyboard_activate)
+        self.bind("<KeyRelease-Return>", self._on_keyboard_activate)
+        self._draw()
+
+    def _rounded_polygon(self, x1: int, y1: int, x2: int, y2: int, radius: int, **kwargs):
+        points = [
+            x1 + radius,
+            y1,
+            x2 - radius,
+            y1,
+            x2,
+            y1,
+            x2,
+            y1 + radius,
+            x2,
+            y2 - radius,
+            x2,
+            y2,
+            x2 - radius,
+            y2,
+            x1 + radius,
+            y2,
+            x1,
+            y2,
+            x1,
+            y2 - radius,
+            x1,
+            y1 + radius,
+            x1,
+            y1,
+        ]
+        return self.create_polygon(points, smooth=True, splinesteps=24, **kwargs)
+
+    def _draw(self) -> None:
+        self.delete("all")
+        width = self._button_width
+        height = self._button_height
+        if self._primary:
+            fill = ACCENT_HOVER if self._hovered else ACCENT
+            if self._pressed:
+                fill = "#152125"
+            outline = "#101a1d"
+            foreground = "#ffffff"
+            highlight = "#55666b"
+            shadow = "#a9b8bd"
+        else:
+            fill = TOOLBAR_GLASS_HOVER if self._hovered else TOOLBAR_GLASS
+            if self._pressed:
+                fill = TOOLBAR_GLASS_PRESSED
+            outline = "#405b65" if self._focused else GLASS_BORDER_STRONG
+            foreground = TOOLBAR_TEXT
+            highlight = HEADER_MUTED if TOOLBAR_TEXT == "#ffffff" else "#ffffff"
+            shadow = GLASS_BORDER
+        self._rounded_polygon(1, 3, width - 1, height - 1, 8, fill=shadow, outline="")
+        self._rounded_polygon(1, 1, width - 1, height - 3, 8, fill=fill, outline=outline, width=1)
+        self.create_line(10, 3, width - 10, 3, fill=highlight, width=1)
+        self.create_text(
+            width // 2,
+            (height - 2) // 2,
+            text=self._label,
+            fill=foreground,
+            font=("Microsoft YaHei UI", 10, "bold"),
+        )
+
+    def _on_enter(self, _event=None) -> None:
+        self._hovered = True
+        self._draw()
+
+    def _on_leave(self, _event=None) -> None:
+        self._hovered = False
+        self._pressed = False
+        self._draw()
+
+    def _on_press(self, _event=None) -> None:
+        self.focus_set()
+        self._pressed = True
+        self._draw()
+
+    def _on_release(self, event=None) -> None:
+        was_pressed = self._pressed
+        self._pressed = False
+        self._draw()
+        if was_pressed and event is not None and 0 <= event.x <= self._button_width and 0 <= event.y <= self._button_height:
+            self._command()
+
+    def _on_focus_in(self, _event=None) -> None:
+        self._focused = True
+        self._draw()
+
+    def _on_focus_out(self, _event=None) -> None:
+        self._focused = False
+        self._draw()
+
+    def _on_keyboard_activate(self, _event=None) -> None:
+        self._command()
 
 
 def resolve_app_data_dir() -> Path:
@@ -179,21 +490,54 @@ DEFAULT_SETTINGS = {
     "model": "",
     "api_key": "",
     "timeout_seconds": 60,
+    "theme": DEFAULT_THEME_KEY,
 }
 
 EVENT_STYLE = {
-    "pending_signup": ("待确认", "#854d0e", "#fef9c3"),
-    "signup_deadline": ("报名截止", "#b91c1c", "#fee2e2"),
-    "signup": ("报名", "#1d4ed8", "#dbeafe"),
-    "result": ("公布", "#7c3aed", "#f3e8ff"),
-    "camp": ("开营", "#15803d", "#dcfce7"),
+    "pending_signup": ("待确认", "#835d0b", "#fff3c4"),
+    "signup_start": ("报名开始", "#175cd3", "#e7efff"),
+    "signup_deadline": ("报名截止", "#b42318", "#ffe4e0"),
+    "signup": ("报名", "#175cd3", "#e7efff"),
+    "result": ("公布", "#6941c6", "#f0eaff"),
+    "camp": ("开营", "#087a55", "#dcf7eb"),
 }
-EVENT_SORT_RANK = {"pending_signup": 0, "signup_deadline": 1, "result": 2, "signup": 3, "camp": 4}
+EVENT_SORT_RANK = {
+    "pending_signup": 0,
+    "signup_start": 1,
+    "signup_deadline": 2,
+    "result": 3,
+    "camp": 4,
+    "signup": 5,
+}
 TREE_EVENT_SORT_RANK = {"pending_signup": 0, "signup": 1, "result": 2, "camp": 3}
 CAMP_FORMAT_EVENT_STYLE = {
-    "offline": ("#c2410c", "#ffedd5"),
+    "offline": ("#b54708", "#fff0dc"),
     "other": EVENT_STYLE["camp"][1:],
 }
+CALENDAR_SHORT_LABELS = {
+    "pending_signup": "待",
+    "signup_start": "始",
+    "signup_deadline": "截",
+    "result": "公",
+    "camp": "营",
+}
+
+
+def should_show_calendar_span(kind: str) -> bool:
+    """Keep long blue signup ranges out of the calendar without affecting lists."""
+    return kind != "signup"
+
+
+def calendar_tile_text(kind: str, tile_height: int) -> str:
+    label = CALENDAR_SHORT_LABELS.get(kind, "")
+    return f"■ {label}" if tile_height >= 19 else label
+
+
+def calendar_bar_capacities(cell_height: int) -> tuple[int, int]:
+    available = max(0, int(cell_height) - 26)
+    return min(3, available // 21), min(3, available // 17)
+
+
 NOTE_FOCUS_MARKERS = ("【重点】", "【风险】", "【歧义】", "【需操作】", "【注意】")
 PERSONAL_PROFILE_PATH = APP_DATA_DIR / "personal_profile.txt"
 RICH_TEXT_PREFIX = "__SUMMER_RICH_TEXT_V1__\n"
@@ -300,9 +644,27 @@ def get_text_plain(text_widget: tk.Text) -> str:
     return text_widget.get("1.0", "end-1c")
 
 
+def apply_text_widget_theme(text_widget: tk.Text) -> None:
+    text_widget.configure(
+        bg=GLASS_SURFACE,
+        fg=TEXT_PRIMARY,
+        insertbackground=TEXT_PRIMARY,
+        relief="flat",
+        bd=0,
+        highlightthickness=1,
+        highlightbackground=GLASS_BORDER_STRONG,
+        highlightcolor="#405b65",
+        padx=8,
+        pady=8,
+        selectbackground=ACCENT_SOFT,
+        selectforeground=TEXT_PRIMARY,
+    )
+
+
 def configure_rich_text_tags(text_widget: tk.Text) -> None:
     base_family = "Microsoft YaHei UI"
     text_widget.configure(font=(base_family, 10), exportselection=False)
+    apply_text_widget_theme(text_widget)
     text_widget.tag_configure("rt_bold", font=(base_family, 10, "bold"))
     text_widget.tag_configure("rt_red", foreground="#dc2626")
     text_widget.tag_configure("rt_italic", font=(base_family, 10, "italic"))
@@ -568,13 +930,13 @@ def toggle_text_tag(text_widget: tk.Text, tag: str, remove_tags: tuple[str, ...]
 
 
 def build_window_control_strip(parent: tk.Widget, controls: list[tuple[str, object, bool]]) -> tk.Frame:
-    strip = tk.Frame(parent, bg="#f8fbff", highlightthickness=0, bd=0)
+    strip = tk.Frame(parent, bg=GLASS_SURFACE_ALT, highlightthickness=0, bd=0)
 
     def make_button(label: str, command, danger: bool = False) -> None:
-        normal_bg = "#f8fbff"
-        hover_bg = "#e5e7eb" if not danger else "#ef4444"
-        fg = "#1f2937" if not danger else "#991b1b"
-        hover_fg = "#1f2937" if not danger else "#ffffff"
+        normal_bg = "#ffffff" if not danger else "#fff1ef"
+        hover_bg = "#edf2f3" if not danger else "#d92d20"
+        fg = TEXT_PRIMARY if not danger else "#b42318"
+        hover_fg = TEXT_PRIMARY if not danger else "#ffffff"
         if label == "×":
             width = 2
             font = ("Segoe UI Symbol", 17, "bold")
@@ -595,8 +957,8 @@ def build_window_control_strip(parent: tk.Widget, controls: list[tuple[str, obje
             strip,
             text=label,
             width=width,
-            relief="flat",
-            bd=0,
+            relief="raised",
+            bd=1,
             bg=normal_bg,
             activebackground=hover_bg,
             fg=fg,
@@ -604,6 +966,9 @@ def build_window_control_strip(parent: tk.Widget, controls: list[tuple[str, obje
             cursor="hand2",
             font=font,
             command=command,
+            highlightthickness=1,
+            highlightbackground=GLASS_BORDER_STRONG,
+            highlightcolor="#405b65",
         )
         button.pack(side="left", ipady=ipady)
         button.bind("<Enter>", lambda _event: button.configure(bg=hover_bg, fg=hover_fg))
@@ -2153,6 +2518,7 @@ class SettingsDialog(tk.Toplevel):
         self.resizable(False, False)
         self.transient(master)
         self.grab_set()
+        self.after(20, lambda: apply_windows_glass(self))
         self.on_save = on_save
         self.api_url_var = tk.StringVar(value=safe_text(settings.get("api_url")))
         self.model_var = tk.StringVar(value=safe_text(settings.get("model")))
@@ -2319,10 +2685,11 @@ class SummerCampPlanner(tk.Tk):
         super().__init__()
         self.title(APP_NAME)
         apply_app_icon(self)
-        self.geometry("1280x820")
-        self.minsize(1080, 680)
+        self.geometry("1360x860")
+        self.minsize(1120, 720)
         self.db = CampDatabase(DB_PATH)
         self.settings = load_settings()
+        self.settings["theme"] = activate_theme_palette(self.settings.get("theme"))
         self.runtime_api_key = ""
         self.camps: list[dict] = []
         self.current_year = date.today().year
@@ -2337,7 +2704,19 @@ class SummerCampPlanner(tk.Tk):
         self.notes_text: tk.Text | None = None
         self.ai_text: tk.Text | None = None
         self.ai_url_entry: ttk.Entry | None = None
+        self.form_canvas: tk.Canvas | None = None
         self.status_label: ttk.Label | None = None
+        self.header_toolbar: tk.Frame | None = None
+        self.header_art: tk.Canvas | None = None
+        self.header_separator: tk.Frame | None = None
+        self._theme_header_photo = None
+        self._header_action_width = 0
+        self._calendar_theme_photos: list[object] = []
+        self._header_redraw_job: str | None = None
+        self.glass_buttons: list[GlassButton] = []
+        self.more_button: GlassButton | None = None
+        self.more_popup: tk.Toplevel | None = None
+        self.theme_var = tk.StringVar(value=ACTIVE_THEME_KEY)
         self.ai_busy = False
         self.ai_action_buttons: list[ttk.Button] = []
         self.school_tree: ttk.Treeview | None = None
@@ -2354,13 +2733,20 @@ class SummerCampPlanner(tk.Tk):
         self.school_search_bar: ttk.Frame | None = None
         self.school_search_var = tk.StringVar(value="")
         self.main_paned: ttk.PanedWindow | None = None
-        self.main_paned_ratio = 0.62
+        self.main_paned_ratio = 0.64
+        self.left_paned: ttk.PanedWindow | None = None
+        self.left_paned_ratio = 0.68
         self._layout_initialized = False
         self._syncing_main_sash = False
+        self._syncing_left_sash = False
         self._last_main_paned_width = 0
+        self._last_left_paned_height = 0
+        self._calendar_resize_job: str | None = None
+        self._calendar_render_size = (0, 0)
         self._build_style()
         self._build_ui()
         self.refresh_all()
+        self.after(20, lambda: apply_windows_glass(self))
         self.after(180, self.apply_initial_layout)
         self.after(350, self.show_daily_briefing)
         self.protocol("WM_DELETE_WINDOW", self.on_close)
@@ -2371,94 +2757,262 @@ class SummerCampPlanner(tk.Tk):
             style.theme_use("clam")
         except tk.TclError:
             pass
-        self.configure(bg="#eef3f8")
-        style.configure(".", font=("Microsoft YaHei UI", 10), background="#eef3f8", foreground="#1f2937")
-        style.configure("TFrame", background="#eef3f8")
-        style.configure("Panel.TFrame", background="#ffffff")
-        style.configure("Header.TFrame", background="#10233f")
-        style.configure("HeaderTitle.TLabel", background="#10233f", foreground="#ffffff", font=("Microsoft YaHei UI", 18, "bold"))
-        style.configure("HeaderSub.TLabel", background="#10233f", foreground="#c8d6e8", font=("Microsoft YaHei UI", 10))
-        style.configure("Status.TLabel", background="#10233f", foreground="#dbeafe")
-        style.configure("Section.TLabelframe", background="#ffffff", bordercolor="#d8e0eb", relief="solid")
-        style.configure("Section.TLabelframe.Label", background="#ffffff", foreground="#23324a", font=("Microsoft YaHei UI", 11, "bold"))
-        style.configure("TLabel", background="#eef3f8", foreground="#1f2937")
-        style.configure("Panel.TLabel", background="#ffffff")
-        style.configure("Muted.TLabel", background="#ffffff", foreground="#6b7280")
-        style.configure("TButton", padding=(11, 6), background="#f8fafc", foreground="#1f2937", bordercolor="#cbd5e1")
-        style.map("TButton", background=[("active", "#edf2f7")])
-        style.configure("Toolbar.TButton", padding=(10, 6), background="#203a5f", foreground="#ffffff", bordercolor="#2e4f7e")
-        style.map("Toolbar.TButton", background=[("active", "#2b4c79")], foreground=[("active", "#ffffff")])
-        style.configure("Accent.TButton", padding=(12, 7), foreground="#ffffff", background="#2563eb", bordercolor="#2563eb")
-        style.map("Accent.TButton", background=[("active", "#1d4ed8")], foreground=[("active", "#ffffff")])
-        style.configure("Danger.TButton", padding=(10, 6), foreground="#ffffff", background="#dc2626", bordercolor="#dc2626")
-        style.map("Danger.TButton", background=[("active", "#b91c1c")], foreground=[("active", "#ffffff")])
-        style.configure("RichToolbar.TFrame", background="#f8fbff")
+        self.configure(bg=APP_BG)
+        style.configure(".", font=("Microsoft YaHei UI", 10), background=APP_BG, foreground=TEXT_PRIMARY)
+        style.configure("TFrame", background=APP_BG)
+        style.configure("Panel.TFrame", background=GLASS_SURFACE)
+        style.configure("Header.TFrame", background=GLASS_HEADER)
+        style.configure(
+            "HeaderTitle.TLabel",
+            background=GLASS_HEADER,
+            foreground=HEADER_TEXT,
+            font=("Microsoft YaHei UI", 17, "bold"),
+        )
+        style.configure("HeaderSub.TLabel", background=GLASS_HEADER, foreground=HEADER_MUTED, font=("Microsoft YaHei UI", 10))
+        style.configure(
+            "Status.TLabel",
+            background=STATUS_BG,
+            foreground=STATUS_TEXT,
+            bordercolor=GLASS_BORDER_STRONG,
+            borderwidth=1,
+            relief="solid",
+            padding=(10, 7),
+            font=("Microsoft YaHei UI", 9, "bold"),
+        )
+        style.configure(
+            "Section.TLabelframe",
+            background=GLASS_SURFACE,
+            bordercolor=GLASS_BORDER_STRONG,
+            borderwidth=1,
+            relief="solid",
+        )
+        style.configure(
+            "Section.TLabelframe.Label",
+            background=GLASS_SURFACE,
+            foreground=TEXT_PRIMARY,
+            font=("Microsoft YaHei UI", 11, "bold"),
+        )
+        style.configure("TLabel", background=APP_BG, foreground=TEXT_PRIMARY)
+        style.configure("Panel.TLabel", background=GLASS_SURFACE, foreground=TEXT_PRIMARY)
+        style.configure("Muted.TLabel", background=GLASS_SURFACE, foreground=TEXT_SECONDARY)
+        style.configure(
+            "TButton",
+            padding=(11, 7),
+            background="#ffffff",
+            foreground=TEXT_PRIMARY,
+            bordercolor=GLASS_BORDER_STRONG,
+            lightcolor=GLASS_BORDER_STRONG,
+            darkcolor=GLASS_BORDER_STRONG,
+            borderwidth=1,
+            focusthickness=1,
+            focuscolor="#405b65",
+            relief="raised",
+        )
+        style.map(
+            "TButton",
+            background=[("pressed", "#dfe6e8"), ("active", "#f2f5f6")],
+            bordercolor=[("focus", "#405b65"), ("active", "#596f78")],
+            lightcolor=[("pressed", "#596f78"), ("active", "#596f78")],
+            darkcolor=[("pressed", "#596f78"), ("active", "#596f78")],
+            relief=[("pressed", "sunken"), ("!pressed", "raised")],
+        )
+        style.configure(
+            "Icon.TButton",
+            padding=(8, 6),
+            background="#edf3f4",
+            foreground=TEXT_PRIMARY,
+            bordercolor=GLASS_BORDER_STRONG,
+            lightcolor=GLASS_BORDER_STRONG,
+            darkcolor=GLASS_BORDER_STRONG,
+            borderwidth=1,
+            relief="raised",
+            font=("Microsoft YaHei UI", 12, "bold"),
+        )
+        style.configure(
+            "Toolbar.TButton",
+            padding=(11, 7),
+            background=TOOLBAR_GLASS,
+            foreground=TEXT_PRIMARY,
+            bordercolor=GLASS_BORDER_STRONG,
+            lightcolor=GLASS_BORDER_STRONG,
+            darkcolor=GLASS_BORDER_STRONG,
+            borderwidth=1,
+            relief="raised",
+            font=("Microsoft YaHei UI", 10, "bold"),
+        )
+        style.map("Toolbar.TButton", background=[("active", TOOLBAR_GLASS_HOVER)], foreground=[("active", TEXT_PRIMARY)])
+        style.configure(
+            "Accent.TButton",
+            padding=(12, 7),
+            foreground="#ffffff",
+            background=ACCENT,
+            bordercolor="#0f1c20",
+            lightcolor="#0f1c20",
+            darkcolor="#0f1c20",
+            borderwidth=1,
+            relief="raised",
+        )
+        style.map("Accent.TButton", background=[("active", ACCENT_HOVER)], foreground=[("active", "#ffffff")])
+        style.configure(
+            "Danger.TButton",
+            padding=(10, 6),
+            foreground="#b42318",
+            background="#fff1ef",
+            bordercolor="#c87a72",
+            lightcolor="#c87a72",
+            darkcolor="#c87a72",
+            borderwidth=1,
+            relief="raised",
+        )
+        style.map("Danger.TButton", background=[("active", "#ffe4e0")], foreground=[("active", "#912018")])
+        style.configure("RichToolbar.TFrame", background=GLASS_SURFACE_ALT)
         style.configure(
             "RichTool.TButton",
             padding=(7, 3),
-            background="#ffffff",
+            background=GLASS_SURFACE,
             foreground="#334155",
-            bordercolor="#d8e2ef",
+            bordercolor=GLASS_BORDER_STRONG,
+            lightcolor=GLASS_BORDER_STRONG,
+            darkcolor=GLASS_BORDER_STRONG,
+            borderwidth=1,
+            relief="raised",
             font=RICH_TOOL_FONT,
         )
-        style.map("RichTool.TButton", background=[("active", "#eef6ff")], foreground=[("active", "#111827")])
+        style.map("RichTool.TButton", background=[("active", "#ffffff")], foreground=[("active", TEXT_PRIMARY)])
         style.configure(
             "RichRed.TButton",
             padding=(7, 3),
             background="#fff7f7",
             foreground="#dc2626",
-            bordercolor="#fecaca",
+            bordercolor="#c87a72",
+            lightcolor="#c87a72",
+            darkcolor="#c87a72",
+            borderwidth=1,
+            relief="raised",
             font=RICH_TOOL_FONT,
         )
         style.map("RichRed.TButton", background=[("active", "#fee2e2")], foreground=[("active", "#b91c1c")])
-        style.configure("Treeview", rowheight=31, background="#ffffff", fieldbackground="#ffffff", foreground="#1f2937", bordercolor="#d8e0eb")
-        style.configure("Treeview.Heading", font=("Microsoft YaHei UI", 10, "bold"), background="#f1f5f9", foreground="#334155")
-        style.map("Treeview", background=[("selected", "#dbeafe")], foreground=[("selected", "#111827")])
-        style.configure("TNotebook", background="#eef3f8", borderwidth=0)
-        style.configure("TNotebook.Tab", padding=(16, 8), background="#e2e8f0", foreground="#334155")
-        style.map("TNotebook.Tab", background=[("selected", "#ffffff")], foreground=[("selected", "#111827")])
-        style.configure("Link.TEntry", fieldbackground="#f8fbff", foreground="#1d4ed8", bordercolor="#bfdbfe")
+        style.configure(
+            "Treeview",
+            rowheight=31,
+            background=GLASS_SURFACE,
+            fieldbackground=GLASS_SURFACE,
+            foreground=TEXT_PRIMARY,
+            bordercolor=GLASS_BORDER_STRONG,
+            borderwidth=1,
+            relief="solid",
+        )
+        style.configure(
+            "Treeview.Heading",
+            font=("Microsoft YaHei UI", 10, "bold"),
+            background=GLASS_SURFACE_ALT,
+            foreground="#394247",
+            bordercolor=GLASS_BORDER_STRONG,
+            borderwidth=1,
+            relief="raised",
+        )
+        style.map("Treeview", background=[("selected", ACCENT_SOFT)], foreground=[("selected", TEXT_PRIMARY)])
+        style.configure("TNotebook", background=WORKSPACE_BG, bordercolor=GLASS_BORDER_STRONG, borderwidth=1, tabmargins=(0, 0, 0, 0))
+        style.configure(
+            "TNotebook.Tab",
+            padding=(16, 9),
+            background="#e7ecee",
+            foreground="#3f4c52",
+            bordercolor=GLASS_BORDER_STRONG,
+            lightcolor=GLASS_BORDER_STRONG,
+            darkcolor=GLASS_BORDER_STRONG,
+            borderwidth=1,
+            relief="raised",
+        )
+        style.map(
+            "TNotebook.Tab",
+            background=[("selected", GLASS_SURFACE), ("active", "#edf2f4")],
+            foreground=[("selected", TEXT_PRIMARY)],
+        )
+        style.configure(
+            "TEntry",
+            fieldbackground="#ffffff",
+            foreground=TEXT_PRIMARY,
+            bordercolor=GLASS_BORDER_STRONG,
+            lightcolor=GLASS_BORDER_STRONG,
+            darkcolor=GLASS_BORDER_STRONG,
+            borderwidth=1,
+            relief="solid",
+            padding=(6, 5),
+        )
+        style.configure(
+            "TCombobox",
+            fieldbackground="#ffffff",
+            foreground=TEXT_PRIMARY,
+            bordercolor=GLASS_BORDER_STRONG,
+            lightcolor=GLASS_BORDER_STRONG,
+            darkcolor=GLASS_BORDER_STRONG,
+            borderwidth=1,
+            relief="solid",
+            padding=(5, 4),
+        )
+        style.configure(
+            "Link.TEntry",
+            fieldbackground="#f8fbff",
+            foreground="#175cd3",
+            bordercolor="#718b98",
+            lightcolor="#718b98",
+            darkcolor="#718b98",
+            borderwidth=1,
+            relief="solid",
+        )
+        style.configure("TPanedwindow", background=WORKSPACE_BG, sashwidth=8, sashrelief="flat")
 
     def _build_ui(self) -> None:
-        toolbar = ttk.Frame(self, padding=(18, 14, 18, 12), style="Header.TFrame")
+        toolbar = tk.Frame(self, height=82, bg=GLASS_HEADER, bd=0, highlightthickness=0)
         toolbar.pack(side="top", fill="x")
-        title_box = ttk.Frame(toolbar, style="Header.TFrame")
-        title_box.pack(side="left", fill="y")
-        ttk.Label(title_box, text="夏令营日程助手", style="HeaderTitle.TLabel").pack(anchor="w")
-        ttk.Label(title_box, text="报名、公布、参营节点统一管理", style="HeaderSub.TLabel").pack(anchor="w", pady=(2, 0))
-
-        action_box = ttk.Frame(toolbar, style="Header.TFrame")
-        action_box.pack(side="right", fill="y")
-        ttk.Button(action_box, text="AI 设置", style="Toolbar.TButton", command=self.open_settings).pack(side="right", padx=(8, 0))
+        toolbar.pack_propagate(False)
+        self.header_toolbar = toolbar
         self.status_var = tk.StringVar(value="就绪")
-        self.status_label = ttk.Label(
+        self.status_var.trace_add("write", self.on_header_status_change)
+        self.header_art = tk.Canvas(
             toolbar,
-            textvariable=self.status_var,
-            style="Status.TLabel",
-            width=48,
-            anchor="e",
+            bg=GLASS_HEADER,
+            highlightthickness=0,
+            bd=0,
         )
-        self.status_label.pack(side="right", padx=12)
-        ttk.Button(action_box, text="个人信息", style="Toolbar.TButton", command=self.open_personal_profile).pack(side="right", padx=(8, 0))
-        ttk.Button(action_box, text="导出日程", style="Toolbar.TButton", command=self.export_schedule).pack(side="right", padx=(8, 0))
-        ttk.Button(action_box, text="备份 ▾", style="Toolbar.TButton", command=self.show_backup_menu).pack(
-            side="right", padx=(8, 0)
-        )
-        ttk.Button(action_box, text="新建", style="Toolbar.TButton", command=self.clear_form).pack(side="right", padx=(8, 0))
+        self.header_art.place(x=0, y=0, relwidth=1.0, relheight=1.0)
+        self.header_art.bind("<Configure>", self.on_header_art_configure)
+
+        button_specs = [
+            ("更多 ▾", 86, self.show_more_menu, False),
+            ("个人信息", 96, self.open_personal_profile, False),
+            ("导出日程", 96, self.export_schedule, False),
+            ("新建", 78, self.clear_form, True),
+        ]
+        self._header_action_width = sum(width + 7 for _text, width, _command, _primary in button_specs) + 18
+        self.draw_header_art()
+        self.glass_buttons = []
+        for index, (text, width, command, primary) in enumerate(button_specs):
+            button = GlassButton(toolbar, text=text, width=width, command=command, primary=primary)
+            button.pack(side="right", padx=(7, 18) if index == 0 else (7, 0))
+            if text.startswith("更多"):
+                self.more_button = button
+            self.glass_buttons.append(button)
+        self.header_separator = tk.Frame(self, height=1, bg=GLASS_BORDER_STRONG, bd=0)
+        self.header_separator.pack(side="top", fill="x")
 
         paned = ttk.PanedWindow(self, orient="horizontal")
         self.main_paned = paned
-        paned.pack(side="top", fill="both", expand=True, padx=16, pady=16)
+        paned.pack(side="top", fill="both", expand=True, padx=14, pady=(12, 14))
         paned.bind("<Configure>", self.on_main_paned_configure)
         paned.bind("<ButtonRelease-1>", self.remember_main_paned_ratio)
 
-        left = ttk.Frame(paned, width=760, style="Panel.TFrame")
-        right = ttk.Frame(paned, width=460, style="Panel.TFrame")
+        left = ttk.Frame(paned, width=820, style="Panel.TFrame")
+        right = ttk.Frame(paned, width=440, style="Panel.TFrame")
         paned.add(left, weight=3)
         paned.add(right, weight=2)
 
         left_paned = ttk.PanedWindow(left, orient="vertical")
+        self.left_paned = left_paned
         left_paned.pack(fill="both", expand=True)
+        left_paned.bind("<Configure>", self.on_left_paned_configure)
+        left_paned.bind("<ButtonRelease-1>", self.remember_left_paned_ratio)
         calendar_pane = ttk.Frame(left_paned, style="Panel.TFrame")
         tree_pane = ttk.Frame(left_paned, style="Panel.TFrame")
         left_paned.add(calendar_pane, weight=4)
@@ -2468,27 +3022,287 @@ class SummerCampPlanner(tk.Tk):
         self._build_tree(tree_pane)
         self._build_right_panel(right)
 
-    def show_backup_menu(self) -> None:
+    def draw_header_art(self) -> None:
+        if self.header_art is None:
+            return
+        canvas = self.header_art
+        canvas.configure(bg=GLASS_HEADER)
+        canvas.delete("all")
+        width = max(1, canvas.winfo_width())
+        height = max(1, canvas.winfo_height())
+        self._theme_header_photo = None
+        if HEADER_ASSET and Image is not None and ImageOps is not None and ImageTk is not None:
+            asset_path = resource_path("assets", HEADER_ASSET)
+            if asset_path.exists():
+                try:
+                    with Image.open(asset_path) as source:
+                        image = ImageOps.fit(
+                            source.convert("RGB"),
+                            (width, height),
+                            method=Image.Resampling.LANCZOS,
+                            centering=(0.5, 0.5),
+                        )
+                    self._theme_header_photo = ImageTk.PhotoImage(image)
+                    canvas.create_image(0, 0, image=self._theme_header_photo, anchor="nw")
+                except Exception:
+                    self._theme_header_photo = None
+        canvas.create_text(
+            18,
+            12,
+            text="夏令营日程助手",
+            anchor="nw",
+            fill=HEADER_TEXT,
+            font=("Microsoft YaHei UI", 17, "bold"),
+        )
+        canvas.create_text(
+            18,
+            47,
+            text=f"{date.today().year} 夏令营申请工作台",
+            anchor="nw",
+            fill=HEADER_MUTED,
+            font=("Microsoft YaHei UI", 10),
+        )
+        canvas.create_text(
+            max(320, width - self._header_action_width - 18),
+            height // 2,
+            text=compact_status_text(self.status_var.get(), 34),
+            anchor="e",
+            fill=HEADER_TEXT,
+            font=("Microsoft YaHei UI", 9, "bold"),
+            tags=("header_status",),
+        )
+
+    def on_header_status_change(self, *_args) -> None:
+        if self.header_art is None or not self.header_art.winfo_exists():
+            return
+        try:
+            self.header_art.itemconfigure(
+                "header_status",
+                text=compact_status_text(self.status_var.get(), 34),
+                fill=HEADER_TEXT,
+            )
+        except tk.TclError:
+            pass
+
+    def on_header_art_configure(self, event=None) -> None:
+        if event is None or event.width < 200 or event.height < 40:
+            return
+        if self._header_redraw_job:
+            self.after_cancel(self._header_redraw_job)
+        self._header_redraw_job = self.after(60, self._redraw_header_art_after_resize)
+
+    def _redraw_header_art_after_resize(self) -> None:
+        self._header_redraw_job = None
+        if self.header_art is not None and self.header_art.winfo_exists():
+            self.draw_header_art()
+
+    def show_theme_menu(self) -> None:
         menu = tk.Menu(
             self,
             tearoff=False,
-            bg="#ffffff",
-            fg="#1f2937",
-            activebackground="#eaf2ff",
-            activeforeground="#10233f",
+            bg=GLASS_SURFACE,
+            fg=TEXT_PRIMARY,
+            activebackground=ACCENT_SOFT,
+            activeforeground=TEXT_PRIMARY,
+            selectcolor=ACCENT,
             borderwidth=1,
             relief="solid",
             font=("Microsoft YaHei UI", 10),
         )
-        menu.add_command(label="导出完整备份...", command=self.export_full_backup)
-        menu.add_separator()
-        menu.add_command(label="导入备份并覆盖当前数据...", command=self.import_backup)
+        self.theme_var.set(ACTIVE_THEME_KEY)
+        for theme_key in THEME_ORDER:
+            menu.add_radiobutton(
+                label=THEME_PALETTES[theme_key]["name"],
+                variable=self.theme_var,
+                value=theme_key,
+                command=lambda key=theme_key: self.apply_theme(key),
+            )
         try:
-            x = self.winfo_pointerx()
-            y = self.winfo_pointery()
-            menu.tk_popup(x, y)
+            menu.tk_popup(self.winfo_pointerx(), self.winfo_pointery())
         finally:
             menu.grab_release()
+
+    def apply_theme(self, theme_key: str) -> None:
+        selected = activate_theme_palette(theme_key)
+        self.theme_var.set(selected)
+        self.settings["theme"] = selected
+        save_settings(self.settings)
+        self._build_style()
+        if self.header_toolbar is not None:
+            self.header_toolbar.configure(bg=GLASS_HEADER)
+        if self.header_separator is not None:
+            self.header_separator.configure(bg=GLASS_BORDER_STRONG)
+        self.draw_header_art()
+        for button in self.glass_buttons:
+            button.configure(bg=GLASS_HEADER)
+            button._draw()
+        if hasattr(self, "calendar_grid"):
+            self.calendar_grid.configure(bg=GLASS_BORDER)
+        if hasattr(self, "form_canvas") and self.form_canvas is not None:
+            self.form_canvas.configure(bg=GLASS_SURFACE)
+        for widget in (self.notes_text, self.expanded_notes_text, self.profile_text, self.ai_text):
+            if widget is not None:
+                apply_text_widget_theme(widget)
+        self.refresh_views()
+        self.after(20, lambda: apply_windows_glass(self))
+        self.update_status(f"已切换主题：{THEME_PALETTES[selected]['name']}")
+
+    def close_more_popup(self) -> None:
+        popup = self.more_popup
+        self.more_popup = None
+        if popup is not None:
+            try:
+                popup.destroy()
+            except tk.TclError:
+                pass
+
+    def run_more_action(self, command) -> None:
+        self.close_more_popup()
+        self.after_idle(command)
+
+    def select_theme_from_more(self, theme_key: str) -> None:
+        self.close_more_popup()
+        self.after_idle(lambda: self.apply_theme(theme_key))
+
+    def show_more_menu(self) -> None:
+        if self.more_popup is not None and self.more_popup.winfo_exists():
+            self.close_more_popup()
+            return
+
+        popup = tk.Toplevel(self)
+        self.more_popup = popup
+        popup.withdraw()
+        popup.overrideredirect(True)
+        popup.transient(self)
+        popup.configure(bg=GLASS_BORDER_STRONG)
+
+        panel = tk.Frame(
+            popup,
+            bg=GLASS_SURFACE,
+            bd=0,
+            highlightthickness=1,
+            highlightbackground=GLASS_BORDER_STRONG,
+            padx=12,
+            pady=10,
+        )
+        panel.pack(fill="both", expand=True)
+
+        def section_label(text: str) -> None:
+            tk.Label(
+                panel,
+                text=text,
+                bg=GLASS_SURFACE,
+                fg=TEXT_SECONDARY,
+                anchor="w",
+                font=("Microsoft YaHei UI", 9, "bold"),
+            ).pack(fill="x", pady=(6, 3))
+
+        def action_button(text: str, command, accent: bool = False) -> tk.Button:
+            normal_bg = ACCENT_SOFT if accent else GLASS_SURFACE_ALT
+            active_bg = ACCENT if accent else TOOLBAR_GLASS_HOVER
+            normal_fg = TEXT_PRIMARY
+            active_fg = "#ffffff" if accent or TOOLBAR_TEXT == "#ffffff" else TEXT_PRIMARY
+            button = tk.Button(
+                panel,
+                text=text,
+                command=lambda: self.run_more_action(command),
+                bg=normal_bg,
+                fg=normal_fg,
+                activebackground=active_bg,
+                activeforeground=active_fg,
+                anchor="w",
+                padx=12,
+                pady=8,
+                bd=0,
+                relief="flat",
+                highlightthickness=1,
+                highlightbackground=GLASS_BORDER_STRONG,
+                highlightcolor=ACCENT,
+                cursor="hand2",
+                font=("Microsoft YaHei UI", 10, "bold" if accent else "normal"),
+            )
+            button.bind("<Enter>", lambda _event: button.configure(bg=active_bg, fg=active_fg))
+            button.bind("<Leave>", lambda _event: button.configure(bg=normal_bg, fg=normal_fg))
+            button.pack(fill="x", pady=3)
+            return button
+
+        tk.Label(
+            panel,
+            text="更多操作",
+            bg=GLASS_SURFACE,
+            fg=TEXT_PRIMARY,
+            anchor="w",
+            font=("Microsoft YaHei UI", 11, "bold"),
+        ).pack(fill="x", pady=(0, 4))
+        action_button("AI 设置", self.open_settings, accent=True)
+
+        section_label("主题")
+        theme_grid = tk.Frame(panel, bg=GLASS_SURFACE, bd=0)
+        theme_grid.pack(fill="x")
+        for column in range(2):
+            theme_grid.columnconfigure(column, weight=1, uniform="theme_options")
+        for index, theme_key in enumerate(THEME_ORDER):
+            palette = THEME_PALETTES[theme_key]
+            selected = theme_key == ACTIVE_THEME_KEY
+            theme_button = tk.Button(
+                theme_grid,
+                text=("✓ " if selected else "") + palette["name"],
+                command=lambda key=theme_key: self.select_theme_from_more(key),
+                bg=palette["GLASS_SURFACE_ALT"],
+                fg=palette["TEXT_PRIMARY"],
+                activebackground=palette["ACCENT_SOFT"],
+                activeforeground=palette["TEXT_PRIMARY"],
+                padx=8,
+                pady=6,
+                bd=0,
+                relief="flat",
+                highlightthickness=2 if selected else 1,
+                highlightbackground=palette["ACCENT"] if selected else GLASS_BORDER,
+                cursor="hand2",
+                font=("Microsoft YaHei UI", 9, "bold" if selected else "normal"),
+            )
+            theme_button.grid(
+                row=index // 2,
+                column=index % 2,
+                sticky="nsew",
+                padx=(0, 3) if index % 2 == 0 else (3, 0),
+                pady=3,
+            )
+
+        separator = tk.Frame(panel, height=1, bg=GLASS_BORDER, bd=0)
+        separator.pack(fill="x", pady=(9, 3))
+        section_label("数据备份")
+        action_button("导出完整备份...", self.export_full_backup)
+        action_button("导入备份并覆盖当前数据...", self.import_backup)
+
+        popup.update_idletasks()
+        width = 320
+        height = popup.winfo_reqheight()
+        anchor = self.more_button
+        if anchor is not None and anchor.winfo_exists():
+            x = anchor.winfo_rootx() + anchor.winfo_width() - width
+            y = anchor.winfo_rooty() + anchor.winfo_height() + 6
+        else:
+            x = self.winfo_pointerx() - width
+            y = self.winfo_pointery() + 8
+        x = max(8, min(x, self.winfo_screenwidth() - width - 8))
+        y = max(8, min(y, self.winfo_screenheight() - height - 8))
+        popup.geometry(f"{width}x{height}+{x}+{y}")
+        popup.bind("<Escape>", lambda _event: self.close_more_popup())
+        popup.bind(
+            "<FocusOut>",
+            lambda _event: self.after(
+                80,
+                lambda: self.close_more_popup()
+                if self.more_popup is popup
+                and (self.focus_get() is None or not str(self.focus_get()).startswith(str(popup)))
+                else None,
+            ),
+        )
+        popup.protocol("WM_DELETE_WINDOW", self.close_more_popup)
+        popup.deiconify()
+        popup.lift()
+        popup.focus_force()
 
     def apply_initial_layout(self) -> None:
         if self._layout_initialized:
@@ -2496,6 +3310,8 @@ class SummerCampPlanner(tk.Tk):
         self._layout_initialized = True
         self.update_idletasks()
         self.sync_main_paned_sash()
+        self.sync_left_paned_sash(prefer_full_calendar=True)
+        self.after(140, self.ensure_initial_calendar_capacity)
 
     def sync_main_paned_sash(self) -> None:
         if self.main_paned is None:
@@ -2542,24 +3358,118 @@ class SummerCampPlanner(tk.Tk):
             self.main_paned_ratio = ratio
             self._last_main_paned_width = width
 
+    @staticmethod
+    def minimum_project_list_height(total_height: int) -> int:
+        return max(96, min(150, total_height // 6))
+
+    def preferred_calendar_pane_height(self) -> int:
+        week_count = len(calendar.Calendar(firstweekday=0).monthdatescalendar(self.current_year, self.current_month))
+        return 125 + week_count * 96
+
+    def ensure_initial_calendar_capacity(self) -> None:
+        if self.left_paned is None or not hasattr(self, "calendar_grid"):
+            return
+        try:
+            total_height = self.left_paned.winfo_height()
+            current = self.left_paned.sashpos(0)
+            cell_height = self.calendar_grid.grid_bbox(0, 1)[3]
+        except (tk.TclError, IndexError):
+            return
+        if total_height <= 240 or cell_height <= 0 or cell_height >= 84:
+            return
+        week_count = len(calendar.Calendar(firstweekday=0).monthdatescalendar(self.current_year, self.current_month))
+        max_calendar = max(120, total_height - self.minimum_project_list_height(total_height))
+        target = min(max_calendar, current + (84 - cell_height) * week_count + 6)
+        if target <= current + 1:
+            return
+        try:
+            self._syncing_left_sash = True
+            self.left_paned.sashpos(0, target)
+            self.left_paned_ratio = target / total_height
+            self._last_left_paned_height = total_height
+            self.after_idle(self.clear_left_sash_sync_flag)
+            if self._calendar_resize_job:
+                self.after_cancel(self._calendar_resize_job)
+            self._calendar_resize_job = self.after(80, self._redraw_calendar_after_resize)
+        except tk.TclError:
+            self._syncing_left_sash = False
+
+    def sync_left_paned_sash(self, prefer_full_calendar: bool = False) -> None:
+        if self.left_paned is None:
+            return
+        try:
+            height = self.left_paned.winfo_height()
+            if height <= 240:
+                return
+            self._last_left_paned_height = height
+            min_list = self.minimum_project_list_height(height)
+            max_calendar = max(120, height - min_list)
+            min_calendar = min(300, max_calendar)
+            target = self.preferred_calendar_pane_height() if prefer_full_calendar else int(height * self.left_paned_ratio)
+            target = max(min_calendar, min(target, max_calendar))
+            if prefer_full_calendar:
+                self.left_paned_ratio = target / height
+            current = self.left_paned.sashpos(0)
+            if abs(current - target) <= 2:
+                return
+            self._syncing_left_sash = True
+            self.left_paned.sashpos(0, target)
+            self.after_idle(self.clear_left_sash_sync_flag)
+        except tk.TclError:
+            pass
+
+    def clear_left_sash_sync_flag(self) -> None:
+        self._syncing_left_sash = False
+
+    def on_left_paned_configure(self, _event=None) -> None:
+        if self.left_paned is None:
+            return
+        height = self.left_paned.winfo_height()
+        if height <= 240:
+            return
+        if not self._layout_initialized or abs(height - self._last_left_paned_height) > 2:
+            self.after_idle(self.sync_left_paned_sash)
+
+    def remember_left_paned_ratio(self, _event=None) -> None:
+        if self.left_paned is None or self._syncing_left_sash:
+            return
+        try:
+            height = self.left_paned.winfo_height()
+            pos = self.left_paned.sashpos(0)
+        except tk.TclError:
+            return
+        if height <= 240:
+            return
+        max_calendar = max(120, height - self.minimum_project_list_height(height))
+        min_calendar = min(300, max_calendar)
+        clamped = max(min_calendar, min(pos, max_calendar))
+        if clamped != pos:
+            self.left_paned.sashpos(0, clamped)
+        self.left_paned_ratio = clamped / height
+        self._last_left_paned_height = height
+        if self._calendar_resize_job:
+            self.after_cancel(self._calendar_resize_job)
+        self._calendar_resize_job = self.after(80, self._redraw_calendar_after_resize)
+
     def _build_calendar(self, parent: ttk.Frame) -> None:
         calendar_box = ttk.LabelFrame(parent, text="日历", style="Section.TLabelframe")
         calendar_box.pack(fill="both", expand=True)
         calendar_box.columnconfigure(0, weight=1)
         calendar_box.rowconfigure(1, weight=1)
 
-        header = ttk.Frame(calendar_box, padding=(12, 10), style="Panel.TFrame")
+        header = ttk.Frame(calendar_box, padding=(12, 9), style="Panel.TFrame")
         header.grid(row=0, column=0, sticky="ew")
-        ttk.Button(header, text="‹", width=4, command=self.prev_month).pack(side="left")
+        ttk.Button(header, text="‹", width=3, style="Icon.TButton", command=self.prev_month).pack(side="left")
         self.month_label = ttk.Label(header, text="", font=("Microsoft YaHei UI", 14, "bold"), style="Panel.TLabel")
         self.month_label.pack(side="left", padx=12)
-        ttk.Button(header, text="›", width=4, command=self.next_month).pack(side="left")
+        ttk.Button(header, text="›", width=3, style="Icon.TButton", command=self.next_month).pack(side="left")
         ttk.Button(header, text="今天", command=self.go_today).pack(side="left", padx=8)
         self.selected_date_var = tk.StringVar(value="")
         ttk.Label(header, textvariable=self.selected_date_var, style="Muted.TLabel").pack(side="right")
 
-        self.calendar_grid = tk.Frame(calendar_box, bg="#d8e2ef")
+        self.calendar_grid = tk.Frame(calendar_box, bg=GLASS_BORDER)
         self.calendar_grid.grid(row=1, column=0, sticky="nsew", padx=12, pady=(0, 12))
+        self.calendar_grid.bind("<Configure>", self.on_calendar_grid_configure)
         for col in range(7):
             self.calendar_grid.columnconfigure(col, weight=1, uniform="calendar")
         for row in range(7):
@@ -2567,7 +3477,7 @@ class SummerCampPlanner(tk.Tk):
 
     def _build_tree(self, parent: ttk.Frame) -> None:
         list_box = ttk.LabelFrame(parent, text="项目列表", style="Section.TLabelframe")
-        list_box.pack(fill="both", expand=True, pady=(10, 0))
+        list_box.pack(fill="both", expand=True, pady=(8, 0))
         columns = ("event", "school", "reg", "date", "format", "status", "next")
         self.tree = ttk.Treeview(list_box, columns=columns, show="headings", height=8)
         headings = {
@@ -2598,9 +3508,9 @@ class SummerCampPlanner(tk.Tk):
         self.tree.bind("<<TreeviewSelect>>", self.on_tree_select)
         self.tree.bind("<Double-1>", self.open_tree_row_links)
         self.tree.tag_configure("pending_signup", background="#fef9c3", foreground="#854d0e")
-        self.tree.tag_configure("signup", background="#eff6ff", foreground="#1d4ed8")
-        self.tree.tag_configure("result", background="#faf5ff", foreground="#7c3aed")
-        self.tree.tag_configure("camp", background="#f0fdf4", foreground="#15803d")
+        self.tree.tag_configure("signup", background="#eef4ff", foreground="#175cd3")
+        self.tree.tag_configure("result", background="#f4f0ff", foreground="#6941c6")
+        self.tree.tag_configure("camp", background="#eaf8f2", foreground="#087a55")
         self.tree.tag_configure("status_pending", background="#fef9c3", foreground="#854d0e")
         self.tree.tag_configure("status_inactive", background="#f1f5f9", foreground="#64748b")
 
@@ -2742,15 +3652,16 @@ class SummerCampPlanner(tk.Tk):
         scrollbar.grid(row=1, column=1, sticky="ns")
         xscrollbar.grid(row=2, column=0, sticky="ew")
         self.school_tree.bind("<<TreeviewSelect>>", self.on_school_tree_select)
-        self.school_tree.tag_configure("focused", background="#fff7ed", foreground="#9a3412")
-        self.school_tree.tag_configure("pending", background="#fef9c3", foreground="#854d0e")
-        self.school_tree.tag_configure("followup", background="#fee2e2", foreground="#b91c1c")
-        self.school_tree.tag_configure("selected_success", background="#ecfdf5", foreground="#047857")
-        self.school_tree.tag_configure("inactive", background="#f1f5f9", foreground="#64748b")
+        self.school_tree.tag_configure("focused", background="#fff2df", foreground="#9a4b08")
+        self.school_tree.tag_configure("pending", background="#fff3c4", foreground="#835d0b")
+        self.school_tree.tag_configure("followup", background="#ffe4e0", foreground="#b42318")
+        self.school_tree.tag_configure("selected_success", background="#dcf7eb", foreground="#087a55")
+        self.school_tree.tag_configure("inactive", background=GLASS_SURFACE_ALT, foreground=TEXT_SECONDARY)
         self.bind_mousewheel(self.school_tree)
 
     def _build_form(self, parent: ttk.Frame) -> None:
-        canvas = tk.Canvas(parent, highlightthickness=0, bg="#ffffff")
+        canvas = tk.Canvas(parent, highlightthickness=0, bg=GLASS_SURFACE)
+        self.form_canvas = canvas
         scrollbar = ttk.Scrollbar(parent, orient="vertical", command=canvas.yview)
         body = ttk.Frame(canvas, padding=16, style="Panel.TFrame")
 
@@ -2899,6 +3810,7 @@ class SummerCampPlanner(tk.Tk):
         ttk.Button(buttons, text="AI 设置", command=self.open_settings).pack(side="right")
 
         self.ai_text = tk.Text(body, height=20, wrap="word", undo=True)
+        apply_text_widget_theme(self.ai_text)
         self.ai_text.grid(row=3, column=0, sticky="nsew")
         scrollbar = ttk.Scrollbar(body, orient="vertical", command=self.ai_text.yview)
         scrollbar.grid(row=3, column=1, sticky="ns")
@@ -3126,12 +4038,14 @@ class SummerCampPlanner(tk.Tk):
             signup_end = parse_iso_date(camp.get("signup_end"))
             if signup_end:
                 add_span(camp, camp.get("signup_end", ""), camp.get("signup_end", ""), "signup_deadline")
-            signup_kind = "pending_signup" if status == "待确认" else "signup"
-            signup_bar_end = signup_end - timedelta(days=1) if signup_start and signup_end else signup_end
-            if signup_start and signup_bar_end and signup_bar_end >= signup_start:
-                add_span(camp, camp.get("signup_start", ""), signup_bar_end.isoformat(), signup_kind)
-            elif signup_start and not signup_end:
-                add_span(camp, camp.get("signup_start", ""), camp.get("signup_start", ""), signup_kind)
+            if status == "待确认":
+                signup_bar_end = signup_end - timedelta(days=1) if signup_start and signup_end else signup_end
+                if signup_start and signup_bar_end and signup_bar_end >= signup_start:
+                    add_span(camp, camp.get("signup_start", ""), signup_bar_end.isoformat(), "pending_signup")
+                elif signup_start and not signup_end:
+                    add_span(camp, camp.get("signup_start", ""), camp.get("signup_start", ""), "pending_signup")
+            elif signup_start:
+                add_span(camp, camp.get("signup_start", ""), camp.get("signup_start", ""), "signup_start")
             add_span(camp, camp.get("result_date", ""), camp.get("result_date", ""), "result")
             add_span(camp, camp.get("camp_start", ""), camp.get("camp_end", ""), "camp")
         spans.sort(key=lambda span: (span.start, EVENT_SORT_RANK.get(span.kind, 99), span.end, span.school))
@@ -3241,9 +4155,10 @@ class SummerCampPlanner(tk.Tk):
         dialog = tk.Toplevel(self)
         dialog.title("今日早报")
         apply_app_icon(dialog)
-        dialog.configure(bg="#f7f9fc")
+        dialog.configure(bg=APP_BG)
         dialog.transient(self)
         dialog.grab_set()
+        dialog.after(20, lambda: apply_windows_glass(dialog))
 
         parent_width = max(self.winfo_width(), 900)
         parent_height = max(self.winfo_height(), 650)
@@ -3254,13 +4169,13 @@ class SummerCampPlanner(tk.Tk):
         dialog.resizable(True, True)
 
         total = sum(len(names) for _title, _kind, names in groups)
-        header = tk.Frame(dialog, bg="#10233f")
+        header = tk.Frame(dialog, bg=GLASS_HEADER, highlightthickness=1, highlightbackground=GLASS_BORDER)
         header.pack(side="top", fill="x")
         tk.Label(
             header,
             text=f"{today.strftime('%m.%d')} 今日早报",
-            bg="#10233f",
-            fg="#ffffff",
+            bg=GLASS_HEADER,
+            fg=HEADER_TEXT,
             font=("Microsoft YaHei UI", 18, "bold"),
             anchor="w",
         ).pack(side="top", fill="x", padx=22, pady=(18, 2))
@@ -3268,20 +4183,20 @@ class SummerCampPlanner(tk.Tk):
         tk.Label(
             header,
             text=summary,
-            bg="#10233f",
-            fg="#c8d6e8",
+            bg=GLASS_HEADER,
+            fg=HEADER_MUTED,
             font=("Microsoft YaHei UI", 11),
             anchor="w",
         ).pack(side="top", fill="x", padx=22, pady=(0, 18))
 
-        content = tk.Frame(dialog, bg="#f7f9fc")
+        content = tk.Frame(dialog, bg=APP_BG)
         content.pack(side="top", fill="both", expand=True, padx=18, pady=16)
         content.rowconfigure(0, weight=1)
         content.columnconfigure(0, weight=1)
 
-        canvas = tk.Canvas(content, bg="#f7f9fc", highlightthickness=0)
+        canvas = tk.Canvas(content, bg=APP_BG, highlightthickness=0)
         scrollbar = ttk.Scrollbar(content, orient="vertical", command=canvas.yview)
-        body = tk.Frame(canvas, bg="#f7f9fc")
+        body = tk.Frame(canvas, bg=APP_BG)
         body_window = canvas.create_window((0, 0), window=body, anchor="nw")
         canvas.configure(yscrollcommand=scrollbar.set)
         canvas.grid(row=0, column=0, sticky="nsew")
@@ -3300,21 +4215,21 @@ class SummerCampPlanner(tk.Tk):
             for title, kind, names in groups:
                 self.add_daily_briefing_section(body, title, kind, names)
         else:
-            empty = tk.Frame(body, bg="#ffffff", highlightthickness=1, highlightbackground="#d8e0eb")
+            empty = tk.Frame(body, bg=GLASS_SURFACE, highlightthickness=1, highlightbackground=GLASS_BORDER)
             empty.pack(side="top", fill="x", pady=(0, 12))
             tk.Label(
                 empty,
                 text="今天暂时没有需要立刻处理的节点",
-                bg="#ffffff",
-                fg="#1f2937",
+                bg=GLASS_SURFACE,
+                fg=TEXT_PRIMARY,
                 font=("Microsoft YaHei UI", 14, "bold"),
                 anchor="w",
             ).pack(side="top", fill="x", padx=18, pady=(18, 4))
             tk.Label(
                 empty,
                 text="可以继续查看项目列表里的后续截止、公布和开营安排。",
-                bg="#ffffff",
-                fg="#64748b",
+                bg=GLASS_SURFACE,
+                fg=TEXT_SECONDARY,
                 font=("Microsoft YaHei UI", 11),
                 anchor="w",
             ).pack(side="top", fill="x", padx=18, pady=(0, 18))
@@ -3322,7 +4237,7 @@ class SummerCampPlanner(tk.Tk):
         self.bind_mousewheel(canvas, canvas)
         self.bind_mousewheel_recursive(body, canvas)
 
-        footer = tk.Frame(dialog, bg="#ffffff")
+        footer = tk.Frame(dialog, bg=GLASS_SURFACE)
         footer.pack(side="bottom", fill="x")
         ttk.Button(footer, text="知道了", command=dialog.destroy).pack(side="right", padx=18, pady=12)
 
@@ -3336,20 +4251,20 @@ class SummerCampPlanner(tk.Tk):
     def add_daily_briefing_section(self, parent: tk.Widget, title: str, kind: str, names: list[str]) -> None:
         style = EVENT_STYLE.get(kind, ("提醒", "#1f2937", "#e2e8f0"))
         label, fg, bg = style
-        section = tk.Frame(parent, bg="#ffffff", highlightthickness=1, highlightbackground="#d8e0eb")
+        section = tk.Frame(parent, bg=GLASS_SURFACE, highlightthickness=1, highlightbackground=GLASS_BORDER)
         section.pack(side="top", fill="x", pady=(0, 12))
         accent = tk.Frame(section, bg=bg, width=8)
         accent.pack(side="left", fill="y")
 
-        inner = tk.Frame(section, bg="#ffffff")
+        inner = tk.Frame(section, bg=GLASS_SURFACE)
         inner.pack(side="left", fill="both", expand=True, padx=16, pady=14)
-        top = tk.Frame(inner, bg="#ffffff")
+        top = tk.Frame(inner, bg=GLASS_SURFACE)
         top.pack(side="top", fill="x")
         tk.Label(
             top,
             text=title,
-            bg="#ffffff",
-            fg="#111827",
+            bg=GLASS_SURFACE,
+            fg=TEXT_PRIMARY,
             font=("Microsoft YaHei UI", 13, "bold"),
             anchor="w",
         ).pack(side="left")
@@ -3367,8 +4282,8 @@ class SummerCampPlanner(tk.Tk):
             tk.Label(
                 inner,
                 text=f"• {name}",
-                bg="#ffffff",
-                fg="#263244",
+                bg=GLASS_SURFACE,
+                fg="#394247",
                 font=("Microsoft YaHei UI", 11),
                 anchor="w",
                 justify="left",
@@ -3390,6 +4305,21 @@ class SummerCampPlanner(tk.Tk):
             lines.append(f"  - {name}：{hint}")
         messagebox.showinfo("未填提醒", "\n".join(lines), parent=self)
 
+    def on_calendar_grid_configure(self, event=None) -> None:
+        if event is None or event.width < 300 or event.height < 180:
+            return
+        old_width, old_height = self._calendar_render_size
+        if abs(event.width - old_width) <= 1 and abs(event.height - old_height) <= 1:
+            return
+        if self._calendar_resize_job:
+            self.after_cancel(self._calendar_resize_job)
+        self._calendar_resize_job = self.after(100, self._redraw_calendar_after_resize)
+
+    def _redraw_calendar_after_resize(self) -> None:
+        self._calendar_resize_job = None
+        if self.calendar_grid.winfo_exists():
+            self.draw_calendar()
+
     def draw_calendar(self) -> None:
         for widget in self.calendar_grid.winfo_children():
             widget.destroy()
@@ -3399,8 +4329,8 @@ class SummerCampPlanner(tk.Tk):
             label = tk.Label(
                 self.calendar_grid,
                 text=name,
-                bg="#e6edf7",
-                fg="#334155",
+                bg=GLASS_SURFACE_ALT,
+                fg="#465159",
                 font=("Microsoft YaHei UI", 10, "bold"),
                 pady=7,
             )
@@ -3410,34 +4340,35 @@ class SummerCampPlanner(tk.Tk):
         spans = self.collect_spans()
         camp_conflicts = self.camp_conflicts_by_day()
         month_days = calendar.Calendar(firstweekday=0).monthdatescalendar(self.current_year, self.current_month)
+        for row in range(1, 7):
+            self.calendar_grid.rowconfigure(row, weight=1 if row <= len(month_days) else 0, minsize=0)
         date_cells: dict[date, tk.Frame] = {}
+        date_headers: dict[date, tk.Canvas] = {}
         for row_index, week in enumerate(month_days, start=1):
             for col_index, day_value in enumerate(week):
                 in_month = day_value.month == self.current_month
                 is_today = day_value == today
                 is_selected = day_value == self.selected_date
-                bg = "#ffffff" if in_month else "#f7f9fc"
+                bg = GLASS_SURFACE if in_month else "#f2f5f6"
                 if is_today:
-                    bg = "#fff7d6"
+                    bg = "#fff4cf"
                 if is_selected:
-                    bg = "#e4efff"
-                cell = tk.Frame(self.calendar_grid, bg=bg, bd=0, highlightthickness=1, highlightbackground="#d7e1ee")
+                    bg = ACCENT_SOFT
+                cell = tk.Frame(self.calendar_grid, bg=bg, bd=0, highlightthickness=1, highlightbackground=GLASS_BORDER)
                 cell.grid(row=row_index, column=col_index, sticky="nsew", padx=1, pady=1)
                 cell.bind("<Button-1>", lambda _event, d=day_value: self.select_date(d))
 
-                date_header = tk.Frame(cell, bg=bg)
+                date_header = tk.Canvas(cell, height=23, bg=bg, bd=0, highlightthickness=0)
                 date_header.pack(side="top", fill="x", padx=5, pady=(4, 1))
                 date_header.bind("<Button-1>", lambda _event, d=day_value: self.select_date(d))
-                date_label = tk.Label(
-                    date_header,
+                date_header.create_text(
+                    1,
+                    1,
                     text=str(day_value.day),
-                    anchor="w",
-                    bg=bg,
-                    fg="#111827" if in_month else "#9aa4b2",
+                    anchor="nw",
+                    fill=TEXT_PRIMARY if in_month else "#98a2a8",
                     font=("Microsoft YaHei UI", 10, "bold" if is_today else "normal"),
                 )
-                date_label.pack(side="left")
-                date_label.bind("<Button-1>", lambda _event, d=day_value: self.select_date(d))
                 if day_value in camp_conflicts:
                     conflict_label = tk.Label(
                         date_header,
@@ -3450,8 +4381,87 @@ class SummerCampPlanner(tk.Tk):
                     conflict_label.pack(side="right")
                     conflict_label.bind("<Button-1>", lambda _event, d=day_value: self.select_date(d))
                 date_cells[day_value] = cell
+                date_headers[day_value] = date_header
 
+        self.calendar_grid.update_idletasks()
+        if self._calendar_resize_job:
+            try:
+                self.after_cancel(self._calendar_resize_job)
+            except tk.TclError:
+                pass
+            self._calendar_resize_job = None
+        self._calendar_render_size = (self.calendar_grid.winfo_width(), self.calendar_grid.winfo_height())
+        self.apply_calendar_wallpaper(date_cells, date_headers)
         self.draw_calendar_spans(spans, date_cells)
+
+    def apply_calendar_wallpaper(
+        self,
+        date_cells: dict[date, tk.Frame],
+        date_headers: dict[date, tk.Canvas],
+    ) -> None:
+        self._calendar_theme_photos = []
+        if not HEADER_ASSET or Image is None or ImageOps is None or ImageTk is None:
+            return
+        asset_path = resource_path("assets", HEADER_ASSET)
+        grid_width = max(1, self.calendar_grid.winfo_width())
+        grid_height = max(1, self.calendar_grid.winfo_height())
+        if not asset_path.exists() or grid_width < 20 or grid_height < 20:
+            return
+        try:
+            with Image.open(asset_path) as source:
+                wallpaper = ImageOps.fit(
+                    source.convert("RGB"),
+                    (grid_width, grid_height),
+                    method=Image.Resampling.LANCZOS,
+                    centering=(0.5, 0.5),
+                )
+            surface = Image.new("RGB", wallpaper.size, GLASS_SURFACE)
+            wallpaper = Image.blend(wallpaper, surface, 0.66)
+            for day, cell in date_cells.items():
+                x = max(0, cell.winfo_x())
+                y = max(0, cell.winfo_y())
+                width = max(1, cell.winfo_width())
+                height = max(1, cell.winfo_height())
+                crop = wallpaper.crop((x, y, min(grid_width, x + width), min(grid_height, y + height)))
+                if crop.size != (width, height):
+                    crop = crop.resize((width, height), Image.Resampling.LANCZOS)
+                cell_bg = safe_text(cell.cget("bg")) or GLASS_SURFACE
+                if cell_bg.lower() != GLASS_SURFACE.lower():
+                    crop = Image.blend(crop, Image.new("RGB", crop.size, cell_bg), 0.48)
+                photo = ImageTk.PhotoImage(crop)
+                wallpaper_label = tk.Label(cell, image=photo, bd=0, highlightthickness=0, cursor="hand2")
+                wallpaper_label.place(x=1, y=1, relwidth=1.0, relheight=1.0, width=-2, height=-2)
+                wallpaper_label.lower()
+                wallpaper_label.bind("<Button-1>", lambda _event, d=day: self.select_date(d))
+                self._calendar_theme_photos.append(photo)
+                date_header = date_headers.get(day)
+                if date_header is not None:
+                    header_x = max(0, date_header.winfo_x())
+                    header_y = max(0, date_header.winfo_y())
+                    header_width = max(1, date_header.winfo_width())
+                    header_height = max(1, date_header.winfo_height())
+                    header_crop = crop.crop(
+                        (
+                            header_x,
+                            header_y,
+                            min(width, header_x + header_width),
+                            min(height, header_y + header_height),
+                        )
+                    )
+                    if header_crop.size != (header_width, header_height):
+                        header_crop = header_crop.resize((header_width, header_height), Image.Resampling.LANCZOS)
+                    header_photo = ImageTk.PhotoImage(header_crop)
+                    date_header.create_image(
+                        0,
+                        0,
+                        image=header_photo,
+                        anchor="nw",
+                        tags=("theme_wallpaper",),
+                    )
+                    date_header.tag_lower("theme_wallpaper")
+                    self._calendar_theme_photos.append(header_photo)
+        except Exception:
+            self._calendar_theme_photos = []
 
     def draw_calendar_spans(
         self,
@@ -3470,39 +4480,109 @@ class SummerCampPlanner(tk.Tk):
             cell = date_cells.get(day)
             if cell is None:
                 continue
+            render_items: list[tuple[str, list[CalendarSpan]]] = []
             for kind, day_spans in sorted(groups.items(), key=lambda item: EVENT_SORT_RANK.get(item[0], 99)):
-                if kind in {"result", "camp"}:
-                    render_groups = [[span] for span in sorted(day_spans, key=lambda item: item.school)]
-                else:
-                    render_groups = [day_spans]
-                for render_spans in render_groups:
-                    fg, bg = EVENT_STYLE.get(kind, ("", "#334155", "#e2e8f0"))[1:]
-                    if kind == "camp":
-                        fg, bg = CAMP_FORMAT_EVENT_STYLE.get(
-                            format_category(render_spans[0].camp_format),
-                            CAMP_FORMAT_EVENT_STYLE["other"],
-                        )
-                    schools = sorted({span.school for span in render_spans})
-                    school_text = schools[0] if schools else ""
-                    if len(schools) > 1:
-                        school_text = f"{school_text}等"
-                    label = EVENT_STYLE.get(kind, ("事件", "", ""))[0]
-                    if any(span.focused for span in render_spans):
-                        label = f"{label}⭐"
-                    title = f"■ {label} {school_text}".strip()
-                    first_span = render_spans[0]
-                    bar = tk.Label(
-                        cell,
-                        text=title,
-                        anchor="w",
-                        bg=bg,
-                        fg=fg,
-                        font=("Microsoft YaHei UI", 8, "bold"),
-                        padx=6,
-                        pady=1,
-                    )
-                    bar.pack(side="top", fill="x", padx=4, pady=1)
-                    bar.bind("<Button-1>", lambda _event, cid=first_span.camp_id, d=day: self.select_event(cid, d))
+                for span in sorted(day_spans, key=lambda item: item.school):
+                    render_items.append((kind, [span]))
+
+            cell_height = max(1, cell.winfo_height())
+            normal_capacity, tight_capacity = calendar_bar_capacities(cell_height)
+            tight_bars = False
+            if len(render_items) <= tight_capacity:
+                visible_items = render_items
+                hidden_items: list[tuple[str, list[CalendarSpan]]] = []
+                tight_bars = len(render_items) > normal_capacity
+            else:
+                visible_capacity = max(0, min(3, (cell_height - 45) // 21))
+                visible_items = render_items[:visible_capacity]
+                hidden_items = render_items[visible_capacity:]
+
+            for kind, render_spans in visible_items:
+                self.draw_calendar_bar(cell, day, kind, render_spans, tight=tight_bars)
+
+            if hidden_items:
+                self.draw_calendar_tiles(cell, day, hidden_items, bool(visible_items))
+
+    def draw_calendar_tiles(
+        self,
+        cell: tk.Frame,
+        day: date,
+        items: list[tuple[str, list[CalendarSpan]]],
+        has_visible_label: bool,
+    ) -> None:
+        cell_height = max(1, cell.winfo_height())
+        tile_height = 17 if has_visible_label else max(16, min(26, cell_height - 30))
+        tile_row = tk.Frame(cell, bg=cell.cget("bg"), bd=0, highlightthickness=0)
+        tile_row.place(
+            x=4,
+            rely=1.0,
+            y=-(tile_height + 4),
+            relwidth=1.0,
+            width=-8,
+            height=tile_height,
+        )
+        tile_row.rowconfigure(0, weight=1)
+        for index, (kind, render_spans) in enumerate(items):
+            color = EVENT_STYLE.get(kind, ("", "#52616a", ""))[1]
+            pale = EVENT_STYLE.get(kind, ("", "", "#e6eaec"))[2]
+            if kind == "camp":
+                color, pale = CAMP_FORMAT_EVENT_STYLE.get(
+                    format_category(render_spans[0].camp_format),
+                    CAMP_FORMAT_EVENT_STYLE["other"],
+                )
+            span = render_spans[0]
+            tile = tk.Label(
+                tile_row,
+                text=calendar_tile_text(kind, tile_height),
+                bg=pale,
+                fg=color,
+                font=("Microsoft YaHei UI", 8, "bold"),
+                bd=0,
+                relief="flat",
+                highlightthickness=0,
+                cursor="hand2",
+            )
+            tile_row.columnconfigure(index, weight=1, uniform="calendar_tiles")
+            tile.grid(row=0, column=index, sticky="nsew", padx=(0, 2 if index < len(items) - 1 else 0))
+            tile.bind("<Button-1>", lambda _event, cid=span.camp_id, d=day: self.select_event(cid, d))
+        tile_row.lift()
+
+    def draw_calendar_bar(
+        self,
+        cell: tk.Frame,
+        day: date,
+        kind: str,
+        render_spans: list[CalendarSpan],
+        tight: bool = False,
+    ) -> None:
+        fg, bg = EVENT_STYLE.get(kind, ("", "#334155", "#e2e8f0"))[1:]
+        if kind == "camp":
+            fg, bg = CAMP_FORMAT_EVENT_STYLE.get(
+                format_category(render_spans[0].camp_format),
+                CAMP_FORMAT_EVENT_STYLE["other"],
+            )
+        schools = sorted({span.school for span in render_spans})
+        school_text = schools[0] if schools else ""
+        if len(schools) > 1:
+            school_text = f"{school_text}等"
+        label = EVENT_STYLE.get(kind, ("事件", "", ""))[0]
+        if any(span.focused for span in render_spans):
+            label = f"{label}⭐"
+        title = f"■ {label} {school_text}".strip()
+        first_span = render_spans[0]
+        bar = tk.Label(
+            cell,
+            text=title,
+            anchor="w",
+            bg=bg,
+            fg=fg,
+            font=("Microsoft YaHei UI", 8, "bold"),
+            padx=6,
+            pady=0 if tight else 1,
+            cursor="hand2",
+        )
+        bar.pack(side="top", fill="x", padx=4, pady=0 if tight else 1)
+        bar.bind("<Button-1>", lambda _event, cid=first_span.camp_id, d=day: self.select_event(cid, d))
 
     def prev_month(self) -> None:
         if self.current_month == 1:
@@ -4351,9 +5431,11 @@ class SummerCampPlanner(tk.Tk):
         SettingsDialog(self, self.settings, self.runtime_api_key, self.apply_settings)
 
     def apply_settings(self, settings: dict, runtime_key: str) -> None:
-        self.settings = settings
+        merged = self.settings.copy()
+        merged.update(settings)
+        self.settings = merged
         self.runtime_api_key = runtime_key
-        save_settings(settings)
+        save_settings(self.settings)
         self.update_status("AI 设置已保存")
 
     def fetch_ai_url_only(self) -> None:
@@ -4533,6 +5615,35 @@ class SummerCampPlanner(tk.Tk):
 
 
 def run_self_test() -> None:
+    required_theme_fields = {
+        "name",
+        "APP_BG",
+        "WORKSPACE_BG",
+        "GLASS_SURFACE",
+        "GLASS_SURFACE_ALT",
+        "GLASS_HEADER",
+        "GLASS_BORDER",
+        "GLASS_BORDER_STRONG",
+        "TEXT_PRIMARY",
+        "TEXT_SECONDARY",
+        "ACCENT",
+        "ACCENT_HOVER",
+        "ACCENT_SOFT",
+        "TOOLBAR_GLASS",
+        "TOOLBAR_GLASS_HOVER",
+        "TOOLBAR_GLASS_PRESSED",
+        "TOOLBAR_TEXT",
+        "HEADER_TEXT",
+        "HEADER_MUTED",
+        "STATUS_BG",
+        "STATUS_TEXT",
+        "HEADER_ASSET",
+    }
+    assert tuple(THEME_PALETTES) == THEME_ORDER
+    assert all(required_theme_fields <= set(palette) for palette in THEME_PALETTES.values())
+    assert activate_theme_palette("night") == "night" and ACTIVE_THEME_KEY == "night"
+    assert activate_theme_palette("missing-theme") == DEFAULT_THEME_KEY
+    assert ACTIVE_THEME_KEY == DEFAULT_THEME_KEY
     with tempfile.TemporaryDirectory() as tmp:
         db = CampDatabase(Path(tmp) / "test.sqlite3")
         try:
@@ -4566,11 +5677,43 @@ def run_self_test() -> None:
             assert normalize_camp_format("形式另行通知") == "待定"
             assert status_sort_rank("放弃") > status_sort_rank("已中选") > status_sort_rank("已报名")
             assert EVENT_SORT_RANK["pending_signup"] < EVENT_SORT_RANK["signup"]
+            assert EVENT_SORT_RANK["signup_start"] < EVENT_SORT_RANK["signup_deadline"]
             assert EVENT_SORT_RANK["signup_deadline"] < EVENT_SORT_RANK["result"]
+            assert should_show_calendar_span("signup") is False
+            assert should_show_calendar_span("signup_start") is True
+            assert should_show_calendar_span("signup_deadline") is True
+            assert calendar_tile_text("result", 17) == "公"
+            assert calendar_tile_text("camp", 19) == "■ 营"
+            assert calendar_bar_capacities(80) == (2, 3)
             today = date.today()
             sanitized = sanitize_ai_data({"school": "测试大学", "signup_end": (today + timedelta(days=5)).isoformat()})
             assert sanitized["signup_start"] == today.isoformat()
             dummy_app = object.__new__(SummerCampPlanner)
+            dummy_app.camps = [
+                {
+                    "id": 101,
+                    "school": "已报名项目",
+                    "status": "已报名",
+                    "signup_start": today.isoformat(),
+                    "signup_end": (today + timedelta(days=5)).isoformat(),
+                    "result_date": (today + timedelta(days=6)).isoformat(),
+                    "camp_start": (today + timedelta(days=7)).isoformat(),
+                    "camp_end": (today + timedelta(days=8)).isoformat(),
+                },
+                {
+                    "id": 102,
+                    "school": "待确认项目",
+                    "status": "待确认",
+                    "signup_start": today.isoformat(),
+                    "signup_end": (today + timedelta(days=3)).isoformat(),
+                },
+            ]
+            calendar_kinds = [span.kind for span in SummerCampPlanner.collect_spans(dummy_app)]
+            assert "signup" not in calendar_kinds
+            assert "signup_start" in calendar_kinds
+            assert "pending_signup" in calendar_kinds
+            assert calendar_kinds.count("signup_deadline") == 2
+            assert "result" in calendar_kinds and "camp" in calendar_kinds
             signup_items = SummerCampPlanner.upcoming_items(
                 dummy_app,
                 {

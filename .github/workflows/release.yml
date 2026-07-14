@@ -7,9 +7,9 @@ on:
   workflow_dispatch:
     inputs:
       release_tag:
-        description: "Release tag, for example v1.0.4"
+        description: "Release tag, for example v1.1.0"
         required: true
-        default: "v1.0.4"
+        default: "v1.1.0"
 
 permissions:
   contents: write
@@ -32,6 +32,8 @@ jobs:
 
             - Windows：下载 `SummerCampPlannerSetup.exe`
             - macOS：下载 `SummerCampPlanner-macOS.dmg`
+
+            本次更新：多主题界面、日历自适应布局、紧凑事件色块与交互优化。
           draft: false
           prerelease: false
 
@@ -53,7 +55,7 @@ jobs:
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
-          python -m pip install pyinstaller playwright certifi
+          python -m pip install pyinstaller playwright certifi pillow
           python -m playwright install chromium
 
       - name: Build Windows installer
@@ -84,7 +86,7 @@ jobs:
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
-          python -m pip install pyinstaller playwright certifi
+          python -m pip install pyinstaller playwright certifi pillow
           python -m playwright install chromium
 
       - name: Build macOS DMG

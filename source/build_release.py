@@ -20,13 +20,29 @@ FORBIDDEN_RELEASE_NAMES = {
     "activation_registry.json",
     "license_diagnostics.log",
     "personal_profile.txt",
+    "personal_profile_data.json",
+    ".env",
+    ".env.local",
+    ".env.production",
     "private_generate_license.py",
     "private_license_generator.html",
     "summer_note.html",
     "user_data",
     "__pycache__",
 }
-FORBIDDEN_RELEASE_SUFFIXES = {".log", ".db", ".sqlite", ".sqlite3", ".csv", ".xlsx", ".xls"}
+FORBIDDEN_RELEASE_SUFFIXES = {
+    ".log",
+    ".db",
+    ".sqlite",
+    ".sqlite3",
+    ".csv",
+    ".xlsx",
+    ".xls",
+    ".pem",
+    ".key",
+    ".p12",
+    ".pfx",
+}
 WINDOWS_RUNTIME_DLL_PATTERNS = (
     "libssl*.dll",
     "libcrypto*.dll",
@@ -50,13 +66,23 @@ def run_with_env(cmd: list[str], env: dict[str, str]) -> None:
 
 
 def clean() -> None:
-    for path in [ROOT / "build", ROOT / "dist", DIST]:
+    for path in [ROOT / "build", ROOT / "dist"]:
         if path.exists():
             shutil.rmtree(path)
+    if DIST.exists():
+        for item in DIST.iterdir():
+            if item.name == "助手教程.pdf":
+                continue
+            if item.is_dir():
+                shutil.rmtree(item)
+            else:
+                item.unlink(missing_ok=True)
 
 
 def is_forbidden_release_path(path: Path) -> bool:
-    if path.name in FORBIDDEN_RELEASE_NAMES:
+    if path.name.casefold() == "cacert.pem" and any(part.casefold() == "certifi" for part in path.parts):
+        return False
+    if path.name.casefold() in {name.casefold() for name in FORBIDDEN_RELEASE_NAMES}:
         return True
     if path.suffix.lower() in FORBIDDEN_RELEASE_SUFFIXES:
         return True
@@ -289,6 +315,9 @@ def build() -> None:
         ]
     )
     shutil.copy2(ROOT / "dist" / "SummerCampPlannerSetup.exe", DIST / "SummerCampPlannerSetup.exe")
+    tutorial = ROOT / "助手教程.pdf"
+    if tutorial.exists() and not (DIST / tutorial.name).exists():
+        shutil.copy2(tutorial, DIST / tutorial.name)
     assert_clean_release_tree(DIST)
     shutil.rmtree(APP_BUNDLE)
     (DIST / "uninstall_app.exe").unlink(missing_ok=True)

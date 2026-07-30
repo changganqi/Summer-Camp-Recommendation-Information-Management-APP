@@ -1,4 +1,6 @@
 settings.json
+personal_profile.txt
+personal_profile_data.json
 .env
 .env.*
 *.pem

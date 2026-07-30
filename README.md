@@ -13,16 +13,24 @@
 - 记录学校、学院、报名号、报名时间、公布时间、开营时间、活动形式、地址、通知链接和备注。
 - 日历用颜色区分待确认、报名、报名截止、公布、开营等节点。
 - 支持多套界面主题，图片主题会铺满顶部和日历背景。
+- 支持自定义背景图片，可分别设置透明度、亮度、缩放方式、裁切焦点和使用区域。
 - 日历会随窗口高度自适应，空间不足时以等分色块保留全部事件入口。
 - 项目列表会按接下来的时间排序，过期项目自动靠后，放弃/落选项目单独灰色显示。
 - 支持关注学校标记，关注项目会带星标，更容易从列表里扫出来。
-- 支持 AI 读取通知链接或通知正文，自动填入结构化字段。
-- 支持 Excel 备份导入和导出，换电脑或重装软件时可以恢复数据。
+- 信息助手支持读取通知链接、整理个人经历以及保存多轮智能对话。
+- 支持完整备份导入和导出，日程、个人信息、智能对话与主题设置均可恢复。
 
 ## 下载
 
-- Windows 安装包：[SummerCampPlannerSetup.exe](https://github.com/changganqi/Summer-Camp-Recommendation-Information-Management-APP/releases/download/v1.1.0/SummerCampPlannerSetup.exe)
+- Windows 安装包：[SummerCampPlannerSetup.exe](https://github.com/changganqi/Summer-Camp-Recommendation-Information-Management-APP/releases/download/v1.4.2/SummerCampPlannerSetup.exe)
 - macOS 安装包：[SummerCampPlanner-macOS.dmg](https://github.com/changganqi/Summer-Camp-Recommendation-Information-Management-APP/releases/download/v1.1.0/SummerCampPlanner-macOS.dmg)
+
+## v1.4.2 更新
+
+- 新增信息助手、个人经历排版和可保存的多会话智能问答。
+- 新增自定义图片主题，图片会保存在软件数据目录并随完整备份恢复。
+- 修复自定义背景切换、窗口缩放和背景层反复闪烁问题。
+- 优化日历自适应布局、紧凑事件色块与主题界面细节。
 
 ## 界面预览
 

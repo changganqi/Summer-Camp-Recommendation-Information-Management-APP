@@ -36,6 +36,7 @@ from xml.etree import ElementTree as ET
 from xml.sax.saxutils import escape as xml_escape
 from license_keys import activate_license, validate_saved_license
 from profile_workspace import (
+    MENTOR_STATUS_OPTIONS,
     build_personal_statement_prompt,
     empty_profile_data,
     extract_template_reference,
@@ -44,6 +45,7 @@ from profile_workspace import (
     new_id as new_profile_id,
     normalize_profile_data,
     normalize_profile_date,
+    normalize_mentor,
     normalize_statement_text,
     save_profile_data,
     statement_char_count,
@@ -666,6 +668,100 @@ class GlassButton(tk.Canvas):
 
     def _on_keyboard_activate(self, _event=None) -> None:
         self._command()
+
+
+class ProfilePillButton(tk.Canvas):
+    """Low-saturation capsule tab used inside the information assistant."""
+
+    def __init__(
+        self,
+        parent: tk.Misc,
+        text: str,
+        command,
+        fill: str,
+        foreground: str,
+        width: int = 112,
+        height: int = 36,
+    ) -> None:
+        super().__init__(
+            parent,
+            width=width,
+            height=height,
+            bg=GLASS_SURFACE,
+            highlightthickness=0,
+            bd=0,
+            cursor="hand2",
+            takefocus=True,
+        )
+        self._label = text
+        self._command = command
+        self._fill = fill
+        self._foreground = foreground
+        self._button_width = width
+        self._button_height = height
+        self._selected = False
+        self._hovered = False
+        self.bind("<Enter>", lambda _event: self._set_hovered(True))
+        self.bind("<Leave>", lambda _event: self._set_hovered(False))
+        self.bind("<Button-1>", lambda _event: self._command())
+        self.bind("<KeyRelease-space>", lambda _event: self._command())
+        self.bind("<KeyRelease-Return>", lambda _event: self._command())
+        self._draw()
+
+    def _rounded_polygon(self, x1: int, y1: int, x2: int, y2: int, radius: int, **kwargs):
+        return self.create_polygon(
+            x1 + radius,
+            y1,
+            x2 - radius,
+            y1,
+            x2,
+            y1 + radius,
+            x2,
+            y2 - radius,
+            x2 - radius,
+            y2,
+            x1 + radius,
+            y2,
+            x1,
+            y2 - radius,
+            x1,
+            y1 + radius,
+            smooth=True,
+            splinesteps=24,
+            **kwargs,
+        )
+
+    def _draw(self) -> None:
+        self.delete("all")
+        self.configure(bg=GLASS_SURFACE)
+        margin = 2 if self._selected else 3
+        outline = self._foreground if self._selected or self._hovered else GLASS_BORDER_STRONG
+        width = 2 if self._selected else 1
+        self._rounded_polygon(
+            margin,
+            margin,
+            self._button_width - margin,
+            self._button_height - margin,
+            (self._button_height - margin * 2) // 2,
+            fill=self._fill,
+            outline=outline,
+            width=width,
+        )
+        self.create_text(
+            self._button_width // 2,
+            self._button_height // 2,
+            text=self._label,
+            fill=self._foreground,
+            font=("Microsoft YaHei UI", 10, "bold"),
+        )
+
+    def _set_hovered(self, hovered: bool) -> None:
+        self._hovered = hovered
+        self._draw()
+
+    def set_selected(self, selected: bool) -> None:
+        self._selected = selected
+        self._draw()
 
 
 def resolve_app_data_dir() -> Path:
@@ -1702,6 +1798,78 @@ def safe_text(value: object) -> str:
     return "" if value is None else str(value)
 
 
+def mentor_college_short_name(value: object) -> str:
+    text = safe_text(value).strip()
+    for suffix in ("学院", "研究院", "学部", "系"):
+        if text.endswith(suffix):
+            text = text[: -len(suffix)]
+            break
+    return text[:4]
+
+
+def school_names_match(left: object, right: object) -> bool:
+    left_text = safe_text(left).strip().casefold()
+    right_text = safe_text(right).strip().casefold()
+    return bool(
+        left_text
+        and right_text
+        and (left_text == right_text or left_text in right_text or right_text in left_text)
+    )
+
+
+def mentor_unknown_start_date(mentor: object) -> date | None:
+    source = mentor if isinstance(mentor, dict) else {}
+    text = safe_text(source.get("unknown_since")).strip()
+    if not text:
+        return None
+    try:
+        return date.fromisoformat(text[:10])
+    except ValueError:
+        return None
+
+
+def unknown_mentor_expired(mentor: object, today: date | None = None) -> bool:
+    source = mentor if isinstance(mentor, dict) else {}
+    if safe_text(source.get("status")) != "未知":
+        return False
+    started = mentor_unknown_start_date(source)
+    return bool(started and ((today or date.today()) - started).days >= 7)
+
+
+def unknown_mentor_days_remaining(mentor: object, today: date | None = None) -> int | None:
+    source = mentor if isinstance(mentor, dict) else {}
+    if safe_text(source.get("status")) != "未知":
+        return None
+    started = mentor_unknown_start_date(source)
+    if started is None:
+        return 7
+    return max(0, 7 - ((today or date.today()) - started).days)
+
+
+def active_mentors_for_school(mentors: object, school: object) -> list[dict]:
+    if not isinstance(mentors, list):
+        return []
+    school_query = safe_text(school).strip().casefold()
+    active: list[dict] = []
+    for raw in mentors:
+        if not isinstance(raw, dict) or safe_text(raw.get("status")) not in {"成功", "待定", "未知"}:
+            continue
+        if school_query and not school_names_match(raw.get("school"), school_query):
+            continue
+        if safe_text(raw.get("name")).strip():
+            active.append(raw)
+    status_rank = {"成功": 0, "待定": 1, "未知": 2}
+    return sorted(
+        active,
+        key=lambda item: (
+            status_rank.get(safe_text(item.get("status")), 9),
+            safe_text(item.get("school")),
+            safe_text(item.get("college")),
+            safe_text(item.get("name")),
+        ),
+    )
+
+
 def clean_xml_text(value: object) -> str:
     text = safe_text(value)
     return "".join(
@@ -2087,6 +2255,27 @@ class CampDatabase:
     def delete(self, camp_id: int) -> None:
         self.conn.execute("DELETE FROM camps WHERE id = ?", (camp_id,))
         self.conn.commit()
+
+    def clear_advisor_for_mentor(self, school: object, mentor_name: object) -> list[int]:
+        target_name = safe_text(mentor_name).strip().casefold()
+        if not target_name or not safe_text(school).strip():
+            return []
+        rows = self.conn.execute("SELECT id, school, advisor FROM camps WHERE TRIM(advisor) <> ''").fetchall()
+        camp_ids = [
+            int(row["id"])
+            for row in rows
+            if safe_text(row["advisor"]).strip().casefold() == target_name
+            and school_names_match(row["school"], school)
+        ]
+        if not camp_ids:
+            return []
+        placeholders = ", ".join("?" for _ in camp_ids)
+        self.conn.execute(
+            f"UPDATE camps SET advisor = '', updated_at = ? WHERE id IN ({placeholders})",
+            [now_text(), *camp_ids],
+        )
+        self.conn.commit()
+        return camp_ids
 
     def replace_all(self, rows: list[dict]) -> None:
         current = now_text()
@@ -3318,7 +3507,6 @@ class CustomThemeDialog(tk.Toplevel):
             settings_panel,
             textvariable=self.target_var,
             values=list(self.TARGET_LABELS),
-            state="readonly",
         )
         target_combo.grid(row=3, column=1, columnspan=2, sticky="ew", padx=(8, 0), pady=5)
         target_combo.bind("<<ComboboxSelected>>", lambda _event: self.on_item_setting_changed(refresh_list=True))
@@ -3328,7 +3516,6 @@ class CustomThemeDialog(tk.Toplevel):
             settings_panel,
             textvariable=self.size_var,
             values=list(self.SIZE_LABELS),
-            state="readonly",
         )
         size_combo.grid(row=4, column=1, columnspan=2, sticky="ew", padx=(8, 0), pady=5)
         size_combo.bind("<<ComboboxSelected>>", lambda _event: self.on_item_setting_changed())
@@ -3338,7 +3525,6 @@ class CustomThemeDialog(tk.Toplevel):
             settings_panel,
             textvariable=self.position_var,
             values=list(self.POSITION_LABELS),
-            state="readonly",
         )
         position_combo.grid(row=5, column=1, columnspan=2, sticky="ew", padx=(8, 0), pady=5)
         position_combo.bind("<<ComboboxSelected>>", lambda _event: self.on_item_setting_changed())
@@ -3776,6 +3962,8 @@ class SummerCampPlanner(tk.Tk):
         self.ai_text: tk.Text | None = None
         self.ai_url_entry: ttk.Entry | None = None
         self.form_canvas: tk.Canvas | None = None
+        self.form_comboboxes: list[ttk.Combobox] = []
+        self.form_add_mentor_button: ttk.Button | None = None
         self.status_label: ttk.Label | None = None
         self.header_toolbar: tk.Frame | None = None
         self.header_art: tk.Canvas | None = None
@@ -3803,6 +3991,11 @@ class SummerCampPlanner(tk.Tk):
         self.form_tab: ttk.Frame | None = None
         self.notes_editor_tab: ttk.Frame | None = None
         self.profile_tab: ttk.Frame | None = None
+        self.mentor_tab: ttk.Frame | None = None
+        self.profile_tab_strip: tk.Frame | None = None
+        self.profile_sections: dict[str, ttk.Frame] = {}
+        self.profile_pill_buttons: dict[str, ProfilePillButton] = {}
+        self.profile_entries_dialog: tk.Toplevel | None = None
         self.expanded_notes_text: tk.Text | None = None
         self.profile_text: tk.Text | None = None
         self.profile_formatted_text: tk.Text | None = None
@@ -3810,6 +4003,24 @@ class SummerCampPlanner(tk.Tk):
         self.profile_entry_vars: dict[str, tk.StringVar] = {}
         self.profile_entries: list[dict] = []
         self.profile_selected_entry_id = ""
+        self.profile_entry_save_button: ttk.Button | None = None
+        self.profile_entry_new_button: ttk.Button | None = None
+        self.mentor_tree: ttk.Treeview | None = None
+        self.mentor_vars: dict[str, tk.StringVar] = {}
+        self.mentor_notes_text: tk.Text | None = None
+        self.mentors: list[dict] = []
+        self.mentor_selected_id = ""
+        self.mentor_save_button: ttk.Button | None = None
+        self.mentor_new_button: ttk.Button | None = None
+        self.mentor_search_var = tk.StringVar(value="")
+        self.mentor_search_bar: ttk.Frame | None = None
+        self.mentor_search_label: ttk.Label | None = None
+        self.mentor_search_field = ""
+        self.mentor_filter_field = ""
+        self.mentor_filter_text = ""
+        self.mentor_filter_status = ""
+        self.advisor_combo: ttk.Combobox | None = None
+        self.advisor_option_map: dict[str, dict] = {}
         self.profile_last_generated_text = ""
         self.profile_data = empty_profile_data()
         self.profile_workspace_loaded = False
@@ -3878,6 +4089,7 @@ class SummerCampPlanner(tk.Tk):
         self._build_style()
         self._build_ui()
         self.refresh_all()
+        self.load_profile_workspace_from_disk()
         self.after(20, lambda: apply_windows_glass(self))
         self.after(180, self.apply_initial_layout)
         self.after(350, self.show_daily_briefing)
@@ -3960,6 +4172,36 @@ class SummerCampPlanner(tk.Tk):
             borderwidth=1,
             relief="raised",
             font=("Microsoft YaHei UI", 12, "bold"),
+        )
+        style.configure(
+            "CompactIcon.TButton",
+            padding=(4, 3),
+            background="#edf3f4",
+            foreground=TEXT_PRIMARY,
+            bordercolor=GLASS_BORDER_STRONG,
+            lightcolor=GLASS_BORDER_STRONG,
+            darkcolor=GLASS_BORDER_STRONG,
+            borderwidth=1,
+            relief="raised",
+            font=("Microsoft YaHei UI", 10, "bold"),
+        )
+        style.map("CompactIcon.TButton", background=[("active", ACCENT_SOFT)])
+        style.configure(
+            "MentorNew.TButton",
+            padding=(11, 7),
+            background="#ffffff",
+            foreground=TEXT_PRIMARY,
+            bordercolor=GLASS_BORDER_STRONG,
+            lightcolor=GLASS_BORDER_STRONG,
+            darkcolor=GLASS_BORDER_STRONG,
+            borderwidth=1,
+            relief="raised",
+            font=("Microsoft YaHei UI", 10, "bold"),
+        )
+        style.map(
+            "MentorNew.TButton",
+            background=[("active", "#f2f6f8"), ("pressed", "#e7eef1")],
+            foreground=[("active", TEXT_PRIMARY), ("pressed", TEXT_PRIMARY)],
         )
         style.configure(
             "Toolbar.TButton",
@@ -4098,8 +4340,24 @@ class SummerCampPlanner(tk.Tk):
             darkcolor=GLASS_BORDER_STRONG,
             borderwidth=1,
             relief="solid",
-            padding=(5, 4),
+            padding=(8, 6),
+            arrowsize=20,
         )
+        style.map(
+            "TCombobox",
+            fieldbackground=[("readonly", "#ffffff")],
+            foreground=[("readonly", TEXT_PRIMARY)],
+            selectbackground=[("readonly", "#ffffff")],
+            selectforeground=[("readonly", TEXT_PRIMARY)],
+        )
+        self.option_add("*TCombobox*Listbox.font", ("Microsoft YaHei UI", 10))
+        self.option_add("*TCombobox*Listbox.background", GLASS_SURFACE)
+        self.option_add("*TCombobox*Listbox.foreground", TEXT_PRIMARY)
+        self.option_add("*TCombobox*Listbox.selectBackground", ACCENT)
+        self.option_add("*TCombobox*Listbox.selectForeground", "#ffffff")
+        self.option_add("*TCombobox*Listbox.borderWidth", 1)
+        self.option_add("*TCombobox*Listbox.relief", "solid")
+        self.option_add("*TCombobox*Listbox.activestyle", "none")
         style.configure(
             "Link.TEntry",
             fieldbackground="#f8fbff",
@@ -4130,7 +4388,6 @@ class SummerCampPlanner(tk.Tk):
 
         button_specs = [
             ("更多 ▾", 86, self.show_more_menu, False),
-            ("信息助手", 96, self.open_personal_profile, False),
             ("导出日程", 96, self.export_schedule, False),
             ("新建", 78, self.clear_form, True),
         ]
@@ -4526,6 +4783,10 @@ class SummerCampPlanner(tk.Tk):
         for button in self.glass_buttons:
             button.configure(bg=GLASS_HEADER)
             button._draw()
+        if self.profile_tab_strip is not None:
+            self.profile_tab_strip.configure(bg=GLASS_SURFACE)
+        for button in self.profile_pill_buttons.values():
+            button._draw()
         if hasattr(self, "calendar_grid"):
             self.calendar_grid.configure(bg=GLASS_BORDER)
         if hasattr(self, "form_canvas") and self.form_canvas is not None:
@@ -4535,12 +4796,15 @@ class SummerCampPlanner(tk.Tk):
             self.expanded_notes_text,
             self.profile_text,
             self.profile_formatted_text,
+            self.mentor_notes_text,
             self.chat_history_text,
             self.chat_input_text,
             self.ai_text,
         ):
             if widget is not None:
                 apply_text_widget_theme(widget)
+        if self.mentor_tree is not None:
+            self.mentor_tree.tag_configure("mentor_failed", foreground=TEXT_SECONDARY)
         if self.chat_composer_frame is not None:
             self.chat_composer_frame.configure(bg=GLASS_SURFACE, highlightbackground=GLASS_BORDER_STRONG)
         if self.chat_input_shell is not None:
@@ -5002,7 +5266,6 @@ class SummerCampPlanner(tk.Tk):
         self.notebook.add(notes_outer, text="备注编辑")
         self.notebook.add(profile_outer, text="信息助手")
         self.notebook.hide(notes_outer)
-        self.notebook.hide(profile_outer)
 
         self._build_school_list(list_outer)
         self._build_form(form_outer)
@@ -5049,22 +5312,49 @@ class SummerCampPlanner(tk.Tk):
         body.columnconfigure(0, weight=1)
         body.rowconfigure(1, weight=1)
 
-        header = ttk.Frame(body, style="Panel.TFrame")
-        header.grid(row=0, column=0, sticky="ew", pady=(0, 8))
-        ttk.Label(header, text="信息助手", font=("Microsoft YaHei UI", 14, "bold"), style="Panel.TLabel").pack(side="left")
-        ttk.Button(header, text="关闭", command=self.close_profile_panel).pack(side="right")
-
-        profile_notebook = ttk.Notebook(body)
-        profile_notebook.grid(row=1, column=0, sticky="nsew")
-        basics_tab = ttk.Frame(profile_notebook, style="Panel.TFrame")
-        entries_tab = ttk.Frame(profile_notebook, style="Panel.TFrame")
-        statement_tab = ttk.Frame(profile_notebook, style="Panel.TFrame")
-        profile_notebook.add(basics_tab, text="基础资料")
-        profile_notebook.add(entries_tab, text="经历与成果")
-        profile_notebook.add(statement_tab, text="智能助手")
+        self.profile_tab_strip = tk.Frame(body, bg=GLASS_SURFACE, bd=0)
+        self.profile_tab_strip.grid(row=0, column=0, sticky="ew", pady=(0, 8))
+        section_host = ttk.Frame(body, style="Panel.TFrame")
+        section_host.grid(row=1, column=0, sticky="nsew")
+        section_host.columnconfigure(0, weight=1)
+        section_host.rowconfigure(0, weight=1)
+        basics_tab = ttk.Frame(section_host, style="Panel.TFrame")
+        self.mentor_tab = ttk.Frame(section_host, style="Panel.TFrame")
+        statement_tab = ttk.Frame(section_host, style="Panel.TFrame")
+        self.profile_sections = {
+            "basics": basics_tab,
+            "mentors": self.mentor_tab,
+            "assistant": statement_tab,
+        }
+        for section in self.profile_sections.values():
+            section.grid(row=0, column=0, sticky="nsew")
+        pill_specs = (
+            ("basics", "基础资料", "#dbeafe", "#1d4ed8"),
+            ("mentors", "导师管理", "#dcfce7", "#087a55"),
+            ("assistant", "智能助手", "#f3e8ff", "#7e22ce"),
+        )
+        for key, label, fill, foreground in pill_specs:
+            button = ProfilePillButton(
+                self.profile_tab_strip,
+                label,
+                lambda selected=key: self.show_profile_section(selected),
+                fill,
+                foreground,
+            )
+            button.pack(side="left", padx=(0, 7))
+            self.profile_pill_buttons[key] = button
         self._build_profile_basics_tab(basics_tab)
-        self._build_profile_entries_tab(entries_tab)
+        self._build_mentor_management_tab(self.mentor_tab)
         self._build_statement_tab(statement_tab)
+        self.show_profile_section("basics")
+
+    def show_profile_section(self, section_key: str) -> None:
+        section = self.profile_sections.get(section_key)
+        if section is None:
+            return
+        section.tkraise()
+        for key, button in self.profile_pill_buttons.items():
+            button.set_selected(key == section_key)
 
     def _build_profile_basics_tab(self, parent: ttk.Frame) -> None:
         body = ttk.Frame(parent, padding=12, style="Panel.TFrame")
@@ -5088,15 +5378,46 @@ class SummerCampPlanner(tk.Tk):
         actions = ttk.Frame(body, style="Panel.TFrame")
         actions.grid(row=3, column=0, columnspan=2, sticky="ew", pady=(12, 0))
         ttk.Button(actions, text="保存个人信息", style="Accent.TButton", command=self.save_profile_panel).pack(side="left")
-        ttk.Button(actions, text="清空", command=self.clear_profile_panel).pack(side="left", padx=8)
+        ttk.Button(actions, text="整理资料", command=self.open_profile_entries_dialog).pack(side="left", padx=(8, 0))
         self.bind_mousewheel(self.profile_text)
+
+    def open_profile_entries_dialog(self) -> None:
+        if self.profile_entries_dialog is None or not self.profile_entries_dialog.winfo_exists():
+            dialog = tk.Toplevel(self)
+            self.profile_entries_dialog = dialog
+            dialog.title("整理经历与成果")
+            dialog.geometry("980x700")
+            dialog.minsize(760, 580)
+            dialog.configure(bg=APP_BG)
+            apply_app_icon(dialog)
+            container = ttk.Frame(dialog, padding=12, style="Panel.TFrame")
+            container.pack(fill="both", expand=True)
+            self._build_profile_entries_tab(container)
+            self.refresh_profile_entry_tree()
+            self.clear_profile_entry_form()
+            self.set_plain_text_widget(
+                self.profile_formatted_text,
+                self.profile_data.get("formatted_text"),
+            )
+            dialog.protocol("WM_DELETE_WINDOW", self.hide_profile_entries_dialog)
+            dialog.after(20, lambda: apply_windows_glass(dialog))
+        else:
+            self.profile_entries_dialog.deiconify()
+        self.profile_entries_dialog.transient(self)
+        self.profile_entries_dialog.lift()
+        self.profile_entries_dialog.focus_force()
+
+    def hide_profile_entries_dialog(self) -> None:
+        if self.profile_entries_dialog is None:
+            return
+        self.persist_profile_workspace(show_error=False)
+        self.profile_entries_dialog.withdraw()
 
     def _build_profile_entries_tab(self, parent: ttk.Frame) -> None:
         body = ttk.Frame(parent, padding=10, style="Panel.TFrame")
         body.pack(fill="both", expand=True)
         body.columnconfigure(0, weight=1)
-        body.rowconfigure(2, weight=3)
-        body.rowconfigure(4, weight=2)
+        body.rowconfigure(2, weight=1)
 
         form = ttk.Frame(body, style="Panel.TFrame")
         form.grid(row=0, column=0, sticky="ew")
@@ -5120,14 +5441,28 @@ class SummerCampPlanner(tk.Tk):
 
         entry_actions = ttk.Frame(body, style="Panel.TFrame")
         entry_actions.grid(row=1, column=0, sticky="ew", pady=(7, 6))
-        ttk.Button(entry_actions, text="保存条目", style="Accent.TButton", command=self.save_profile_entry).pack(side="left")
-        ttk.Button(entry_actions, text="新建", command=self.clear_profile_entry_form).pack(side="left", padx=(7, 0))
-        entry_more = ttk.Button(entry_actions, text="⋯", style="Icon.TButton", width=3)
-        entry_more.configure(command=lambda: self.show_profile_entry_menu(entry_more))
-        entry_more.pack(side="right")
+        self.profile_entry_save_button = ttk.Button(
+            entry_actions,
+            text="保存条目",
+            style="Accent.TButton",
+            command=self.save_profile_entry,
+        )
+        self.profile_entry_save_button.pack(side="left")
+        self.profile_entry_new_button = ttk.Button(
+            entry_actions,
+            text="新建",
+            command=self.clear_profile_entry_form,
+        )
 
-        tree_frame = ttk.Frame(body, style="Panel.TFrame")
-        tree_frame.grid(row=2, column=0, sticky="nsew")
+        content_paned = ttk.PanedWindow(body, orient="vertical")
+        content_paned.grid(row=2, column=0, sticky="nsew")
+        table_pane = ttk.Frame(content_paned, style="Panel.TFrame")
+        formatted_pane = ttk.Frame(content_paned, style="Panel.TFrame")
+        content_paned.add(table_pane, weight=3)
+        content_paned.add(formatted_pane, weight=2)
+
+        tree_frame = ttk.Frame(table_pane, style="Panel.TFrame")
+        tree_frame.pack(fill="both", expand=True)
         tree_frame.columnconfigure(0, weight=1)
         tree_frame.rowconfigure(0, weight=1)
         columns = ("date", "organization", "project", "rank")
@@ -5144,13 +5479,16 @@ class SummerCampPlanner(tk.Tk):
         entry_scrollbar.grid(row=0, column=1, sticky="ns")
         entry_xscrollbar.grid(row=1, column=0, sticky="ew")
         self.profile_entry_tree.bind("<<TreeviewSelect>>", self.on_profile_entry_select)
+        self.profile_entry_tree.bind("<Button-3>", self.show_profile_entry_menu)
 
-        formatted_header = ttk.Frame(body, style="Panel.TFrame")
-        formatted_header.grid(row=3, column=0, sticky="ew", pady=(9, 5))
+        formatted_pane.columnconfigure(0, weight=1)
+        formatted_pane.rowconfigure(1, weight=1)
+        formatted_header = ttk.Frame(formatted_pane, style="Panel.TFrame")
+        formatted_header.grid(row=0, column=0, sticky="ew", pady=(6, 5))
         ttk.Label(formatted_header, text="排版结果", font=("Microsoft YaHei UI", 11, "bold"), style="Panel.TLabel").pack(side="left")
 
-        formatted_frame = ttk.Frame(body, style="Panel.TFrame")
-        formatted_frame.grid(row=4, column=0, sticky="nsew")
+        formatted_frame = ttk.Frame(formatted_pane, style="Panel.TFrame")
+        formatted_frame.grid(row=1, column=0, sticky="nsew")
         formatted_frame.columnconfigure(0, weight=1)
         formatted_frame.rowconfigure(0, weight=1)
         self.profile_formatted_text = tk.Text(formatted_frame, height=7, wrap="word", undo=True)
@@ -5171,6 +5509,119 @@ class SummerCampPlanner(tk.Tk):
         )
         self.bind_mousewheel(self.profile_entry_tree)
         self.bind_mousewheel(self.profile_formatted_text)
+
+    def _build_mentor_management_tab(self, parent: ttk.Frame) -> None:
+        body = ttk.Frame(parent, padding=10, style="Panel.TFrame")
+        body.pack(fill="both", expand=True)
+        body.columnconfigure(0, weight=1)
+        body.rowconfigure(2, weight=1)
+
+        list_toolbar = ttk.Frame(body, style="Panel.TFrame")
+        list_toolbar.grid(row=0, column=0, sticky="ew", pady=(0, 7))
+        ttk.Label(
+            list_toolbar,
+            text="导师列表",
+            font=("Microsoft YaHei UI", 11, "bold"),
+            style="Panel.TLabel",
+        ).pack(side="left")
+        self.mentor_new_button = ttk.Button(
+            list_toolbar,
+            text="＋ 新建导师",
+            style="MentorNew.TButton",
+            command=self.clear_mentor_form,
+        )
+
+        self.mentor_search_bar = ttk.Frame(body, style="Panel.TFrame")
+        self.mentor_search_bar.columnconfigure(1, weight=1)
+        self.mentor_search_label = ttk.Label(self.mentor_search_bar, text="搜索导师", style="Panel.TLabel")
+        self.mentor_search_label.grid(row=0, column=0, sticky="w")
+        search_entry = ttk.Entry(self.mentor_search_bar, textvariable=self.mentor_search_var)
+        search_entry.grid(row=0, column=1, sticky="ew", padx=6)
+        ttk.Button(
+            self.mentor_search_bar,
+            text="确定",
+            style="Accent.TButton",
+            command=self.apply_mentor_text_filter,
+        ).grid(row=0, column=2)
+        ttk.Button(
+            self.mentor_search_bar,
+            text="清除",
+            command=self.clear_mentor_text_filter,
+        ).grid(row=0, column=3, padx=(6, 0))
+        search_entry.bind("<Return>", lambda _event: self.apply_mentor_text_filter())
+
+        tree_frame = ttk.Frame(body, style="Panel.TFrame")
+        tree_frame.grid(row=2, column=0, sticky="nsew")
+        tree_frame.columnconfigure(0, weight=1)
+        tree_frame.rowconfigure(0, weight=1)
+        columns = ("name", "school", "college", "status")
+        self.mentor_tree = ttk.Treeview(tree_frame, columns=columns, show="headings", height=7)
+        headings = {"name": "导师", "school": "学校", "college": "学院", "status": "状态"}
+        widths = {"name": 110, "school": 180, "college": 180, "status": 112}
+        for column in columns:
+            if column == "name":
+                self.mentor_tree.heading(column, text=headings[column], command=lambda: self.show_mentor_search("name"))
+            elif column == "school":
+                self.mentor_tree.heading(column, text=headings[column], command=lambda: self.show_mentor_search("school"))
+            elif column == "status":
+                self.mentor_tree.heading(column, text=headings[column], command=self.cycle_mentor_status_filter)
+            else:
+                self.mentor_tree.heading(column, text=headings[column])
+            self.mentor_tree.column(column, width=widths[column], minwidth=55, anchor="w")
+        mentor_scrollbar = ttk.Scrollbar(tree_frame, orient="vertical", command=self.mentor_tree.yview)
+        mentor_xscrollbar = ttk.Scrollbar(tree_frame, orient="horizontal", command=self.mentor_tree.xview)
+        self.mentor_tree.configure(yscrollcommand=mentor_scrollbar.set, xscrollcommand=mentor_xscrollbar.set)
+        self.mentor_tree.grid(row=0, column=0, sticky="nsew")
+        mentor_scrollbar.grid(row=0, column=1, sticky="ns")
+        mentor_xscrollbar.grid(row=1, column=0, sticky="ew")
+        self.mentor_tree.bind("<<TreeviewSelect>>", self.on_mentor_tree_select)
+        self.mentor_tree.bind("<Button-1>", self.on_mentor_tree_click, add="+")
+        self.mentor_tree.tag_configure("mentor_success", foreground="#087a55")
+        self.mentor_tree.tag_configure("mentor_pending", foreground="#835d0b")
+        self.mentor_tree.tag_configure("mentor_unknown", foreground="#7c3aed")
+        self.mentor_tree.tag_configure("mentor_failed", foreground=TEXT_SECONDARY)
+
+        editor = ttk.Labelframe(body, text="导师信息", padding=9, style="Section.TLabelframe")
+        editor.grid(row=3, column=0, sticky="ew", pady=(9, 0))
+        for column in (1, 3):
+            editor.columnconfigure(column, weight=1)
+        for key in ("name", "school", "college", "status"):
+            self.mentor_vars[key] = tk.StringVar(value="未知" if key == "status" else "")
+        fields = (
+            ("name", "导师名称", 0, 0),
+            ("school", "学校", 0, 2),
+            ("college", "学院", 1, 0),
+        )
+        for key, label, row, column in fields:
+            ttk.Label(editor, text=label, style="Panel.TLabel").grid(
+                row=row, column=column, sticky="w", padx=((0 if column == 0 else 10), 5), pady=3
+            )
+            ttk.Entry(editor, textvariable=self.mentor_vars[key]).grid(
+                row=row, column=column + 1, sticky="ew", pady=3
+            )
+        ttk.Label(editor, text="状态", style="Panel.TLabel").grid(row=1, column=2, sticky="w", padx=(10, 5), pady=3)
+        ttk.Combobox(
+            editor,
+            textvariable=self.mentor_vars["status"],
+            values=MENTOR_STATUS_OPTIONS,
+        ).grid(row=1, column=3, sticky="ew", pady=3)
+        ttk.Label(editor, text="备注", style="Panel.TLabel").grid(row=2, column=0, sticky="nw", pady=(5, 3))
+        self.mentor_notes_text = tk.Text(editor, height=3, wrap="word", undo=True)
+        apply_text_widget_theme(self.mentor_notes_text)
+        self.mentor_notes_text.grid(row=2, column=1, columnspan=3, sticky="ew", pady=(5, 3))
+
+        actions = ttk.Frame(editor, style="Panel.TFrame")
+        actions.grid(row=3, column=0, columnspan=4, sticky="ew", pady=(7, 0))
+        self.mentor_save_button = ttk.Button(
+            actions,
+            text="保存导师",
+            style="Accent.TButton",
+            command=self.save_mentor,
+        )
+        self.mentor_save_button.pack(side="left")
+        ttk.Button(actions, text="删除", style="Danger.TButton", command=self.delete_mentor).pack(side="right")
+        self.bind_mousewheel(self.mentor_tree)
+        self.bind_mousewheel(self.mentor_notes_text)
 
     def style_chat_icon_button(self, button: tk.Button, accent: bool, *, hover: bool = False) -> None:
         is_chat_stop = (
@@ -5401,7 +5852,7 @@ class SummerCampPlanner(tk.Tk):
         school_label = tk.Label(composer, text="学校（可选）", bg=GLASS_SURFACE, fg=TEXT_SECONDARY, font=("Microsoft YaHei UI", 9))
         self.chat_surface_labels.append(school_label)
         school_label.grid(row=0, column=0, sticky="w", padx=(11, 5), pady=(8, 3))
-        self.statement_school_combo = ttk.Combobox(composer, textvariable=self.statement_school_var, state="readonly")
+        self.statement_school_combo = ttk.Combobox(composer, textvariable=self.statement_school_var)
         self.statement_school_combo.grid(row=0, column=1, columnspan=2, sticky="ew", padx=(0, 10), pady=(8, 3))
         self.statement_school_combo.bind("<<ComboboxSelected>>", self.on_chat_school_changed)
 
@@ -5423,11 +5874,7 @@ class SummerCampPlanner(tk.Tk):
         self.chat_input_text.grid(row=0, column=1, sticky="ew", pady=(3, 0))
         self.chat_input_text.bind("<FocusIn>", self.on_chat_input_focus_in)
         self.chat_input_text.bind("<FocusOut>", self.on_chat_input_focus_out)
-        self.chat_input_text.bind(
-            "<ButtonRelease-1>",
-            lambda _event: self.after_idle(lambda: self.focus_chat_input(force=True)),
-            add="+",
-        )
+        self.chat_input_text.bind("<ButtonPress-1>", self.on_chat_input_pointer_press, add="+")
         self.chat_input_text.bind("<KeyRelease>", self.sync_chat_input_placeholder)
         self.chat_input_text.bind("<<Paste>>", lambda _event: self.after_idle(self.sync_chat_input_placeholder))
         self.chat_input_text.bind("<<Cut>>", lambda _event: self.after_idle(self.sync_chat_input_placeholder))
@@ -5457,7 +5904,7 @@ class SummerCampPlanner(tk.Tk):
         self.chat_attachment_label.bind("<Button-1>", lambda _event: self.clear_chat_attachments())
         self.restore_chat_input_placeholder()
         self.statement_busy_widgets = [
-            (self.statement_school_combo, "readonly"),
+            (self.statement_school_combo, "normal"),
             (self.chat_input_text, "normal"),
             (new_button, "normal"),
             (more_button, "normal"),
@@ -5524,7 +5971,12 @@ class SummerCampPlanner(tk.Tk):
     def _build_form(self, parent: ttk.Frame) -> None:
         canvas = tk.Canvas(parent, highlightthickness=0, bg=GLASS_SURFACE)
         self.form_canvas = canvas
-        scrollbar = ttk.Scrollbar(parent, orient="vertical", command=canvas.yview)
+        self.form_comboboxes = []
+        scrollbar = ttk.Scrollbar(
+            parent,
+            orient="vertical",
+            command=lambda *args: self.scroll_form_canvas(canvas, *args),
+        )
         body = ttk.Frame(canvas, padding=16, style="Panel.TFrame")
 
         def update_scrollregion(_event=None) -> None:
@@ -5557,20 +6009,28 @@ class SummerCampPlanner(tk.Tk):
         self.vars["status"] = tk.StringVar(value="待确认")
         self.vars["priority"] = tk.StringVar(value="普通")
         ttk.Label(body, text="状态", style="Panel.TLabel").grid(row=row, column=0, sticky="w", pady=4)
-        ttk.Combobox(body, textvariable=self.vars["status"], values=STATUS_OPTIONS, state="readonly").grid(
-            row=row, column=1, sticky="ew", pady=4
-        )
+        status_combo = ttk.Combobox(body, textvariable=self.vars["status"], values=STATUS_OPTIONS)
+        status_combo.grid(row=row, column=1, sticky="ew", pady=4)
+        self.form_comboboxes.append(status_combo)
         row += 1
         ttk.Label(body, text="优先级", style="Panel.TLabel").grid(row=row, column=0, sticky="w", pady=4)
-        ttk.Combobox(body, textvariable=self.vars["priority"], values=PRIORITY_OPTIONS, state="readonly").grid(
-            row=row, column=1, sticky="ew", pady=4
+        priority_combo = ttk.Combobox(
+            body,
+            textvariable=self.vars["priority"],
+            values=PRIORITY_OPTIONS,
         )
+        priority_combo.grid(row=row, column=1, sticky="ew", pady=4)
+        self.form_comboboxes.append(priority_combo)
         row += 1
         self.vars["project_type"] = tk.StringVar(value="硕士")
         ttk.Label(body, text="类型（硕士/直博）", style="Panel.TLabel").grid(row=row, column=0, sticky="w", pady=4)
-        ttk.Combobox(body, textvariable=self.vars["project_type"], values=PROJECT_TYPE_OPTIONS, state="readonly").grid(
-            row=row, column=1, sticky="ew", pady=4
+        project_type_combo = ttk.Combobox(
+            body,
+            textvariable=self.vars["project_type"],
+            values=PROJECT_TYPE_OPTIONS,
         )
+        project_type_combo.grid(row=row, column=1, sticky="ew", pady=4)
+        self.form_comboboxes.append(project_type_combo)
         row += 1
 
         ttk.Separator(body).grid(row=row, column=0, columnspan=3, sticky="ew", pady=10)
@@ -5587,9 +6047,9 @@ class SummerCampPlanner(tk.Tk):
 
         self.vars["camp_format"] = tk.StringVar(value="待定")
         ttk.Label(body, text="形式", style="Panel.TLabel").grid(row=row, column=0, sticky="w", pady=4)
-        ttk.Combobox(body, textvariable=self.vars["camp_format"], values=FORMAT_OPTIONS).grid(
-            row=row, column=1, columnspan=2, sticky="ew", pady=4
-        )
+        format_combo = ttk.Combobox(body, textvariable=self.vars["camp_format"], values=FORMAT_OPTIONS)
+        format_combo.grid(row=row, column=1, columnspan=2, sticky="ew", pady=4)
+        self.form_comboboxes.append(format_combo)
         row += 1
 
         self.vars["camp_address"] = tk.StringVar()
@@ -5599,7 +6059,27 @@ class SummerCampPlanner(tk.Tk):
 
         self.vars["advisor"] = tk.StringVar()
         ttk.Label(body, text="意向导师", style="Panel.TLabel").grid(row=row, column=0, sticky="w", pady=4)
-        ttk.Entry(body, textvariable=self.vars["advisor"]).grid(row=row, column=1, columnspan=2, sticky="ew", pady=4)
+        advisor_row = ttk.Frame(body, style="Panel.TFrame")
+        advisor_row.grid(row=row, column=1, columnspan=2, sticky="ew", pady=4)
+        advisor_row.columnconfigure(0, weight=1)
+        self.advisor_combo = ttk.Combobox(
+            advisor_row,
+            textvariable=self.vars["advisor"],
+            postcommand=self.refresh_advisor_options,
+        )
+        self.advisor_combo.grid(row=0, column=0, sticky="ew")
+        self.form_comboboxes.append(self.advisor_combo)
+        self.advisor_combo.bind("<<ComboboxSelected>>", self.on_advisor_selected)
+        self.advisor_combo.bind("<FocusIn>", lambda _event: self.refresh_advisor_options(), add="+")
+        self.form_add_mentor_button = ttk.Button(
+            advisor_row,
+            text="+",
+            width=2,
+            style="CompactIcon.TButton",
+            command=self.open_quick_mentor_dialog,
+        )
+        self.form_add_mentor_button.grid(row=0, column=1, padx=(4, 0))
+        self.vars["school"].trace_add("write", lambda *_args: self.refresh_advisor_options())
         row += 1
 
         ttk.Separator(body).grid(row=row, column=0, columnspan=3, sticky="ew", pady=10)
@@ -5646,6 +6126,8 @@ class SummerCampPlanner(tk.Tk):
 
         for field in EDITABLE_FIELDS:
             self.vars.setdefault(field, tk.StringVar())
+        for combo in self.form_comboboxes:
+            combo.bind("<<ComboboxSelected>>", self.on_form_combobox_selected, add="+")
         self.bind_mousewheel(canvas, canvas)
         self.bind_mousewheel_recursive(body, canvas)
         self.bind_mousewheel(self.notes_text, add=False)
@@ -5669,7 +6151,6 @@ class SummerCampPlanner(tk.Tk):
         fetch_button.pack(side="left", padx=8)
         text_parse_button = ttk.Button(buttons, text="粘贴正文识别", command=self.ai_from_text)
         text_parse_button.pack(side="left")
-        ttk.Button(buttons, text="AI 设置", command=self.open_settings).pack(side="right")
 
         self.ai_text = tk.Text(body, height=20, wrap="word", undo=True)
         apply_text_widget_theme(self.ai_text)
@@ -5687,6 +6168,32 @@ class SummerCampPlanner(tk.Tk):
         self.ai_action_buttons = [fetch_parse_button, fetch_button, text_parse_button, local_button, clear_button]
         self.bind_mousewheel(self.ai_text)
 
+    def dismiss_form_comboboxes(self) -> None:
+        for combo in self.form_comboboxes:
+            try:
+                self.tk.call("ttk::combobox::Unpost", combo._w)
+            except tk.TclError:
+                pass
+
+    def on_form_combobox_selected(self, event) -> None:
+        combo = event.widget
+
+        def finish_selection() -> None:
+            if not combo.winfo_exists():
+                return
+            if safe_text(combo.cget("state")) != "readonly":
+                try:
+                    combo.selection_clear()
+                    combo.icursor("end")
+                except tk.TclError:
+                    pass
+
+        self.after_idle(finish_selection)
+
+    def scroll_form_canvas(self, canvas: tk.Canvas, *args) -> None:
+        self.dismiss_form_comboboxes()
+        canvas.yview(*args)
+
     def bind_mousewheel(self, widget, target=None, add=True) -> None:
         def on_mousewheel(event):
             scroll_target = target or widget
@@ -5699,6 +6206,8 @@ class SummerCampPlanner(tk.Tk):
             else:
                 units = 0
             if units and hasattr(scroll_target, "yview_scroll"):
+                if scroll_target is self.form_canvas:
+                    self.dismiss_form_comboboxes()
                 scroll_target.yview_scroll(units, "units")
             return "break"
 
@@ -6021,12 +6530,8 @@ class SummerCampPlanner(tk.Tk):
             signup_end = parse_iso_date(camp.get("signup_end"))
             if signup_end:
                 add_span(camp, camp.get("signup_end", ""), camp.get("signup_end", ""), "signup_deadline")
-            if status == "待确认":
-                signup_bar_end = signup_end - timedelta(days=1) if signup_start and signup_end else signup_end
-                if signup_start and signup_bar_end and signup_bar_end >= signup_start:
-                    add_span(camp, camp.get("signup_start", ""), signup_bar_end.isoformat(), "pending_signup")
-                elif signup_start and not signup_end:
-                    add_span(camp, camp.get("signup_start", ""), camp.get("signup_start", ""), "pending_signup")
+            if status == "待确认" and signup_start:
+                add_span(camp, camp.get("signup_start", ""), camp.get("signup_start", ""), "pending_signup")
             elif signup_start:
                 add_span(camp, camp.get("signup_start", ""), camp.get("signup_start", ""), "signup_start")
             add_span(camp, camp.get("result_date", ""), camp.get("result_date", ""), "result")
@@ -6980,6 +7485,7 @@ class SummerCampPlanner(tk.Tk):
         self.tree.selection_remove(self.tree.selection())
         if self.form_tab is not None:
             self.notebook.select(self.form_tab)
+        self.refresh_advisor_options()
 
     def load_camp(self, camp_id: int) -> None:
         camp = self.db.get(camp_id)
@@ -7005,6 +7511,7 @@ class SummerCampPlanner(tk.Tk):
                 self.set_notes_text(safe_text(camp.get("notes")))
             if self.form_tab is not None:
                 self.notebook.select(self.form_tab)
+            self.refresh_advisor_options()
         finally:
             self._loading_selection = False
 
@@ -7106,8 +7613,6 @@ class SummerCampPlanner(tk.Tk):
     def open_personal_profile(self) -> None:
         if self.profile_text is None or self.profile_tab is None:
             return
-        self.load_profile_workspace_from_disk()
-        self.notebook.add(self.profile_tab, text="信息助手")
         self.notebook.select(self.profile_tab)
         self.profile_text.focus_set()
 
@@ -7130,14 +7635,31 @@ class SummerCampPlanner(tk.Tk):
         self.profile_selected_entry_id = ""
         self.refresh_profile_entry_tree()
         self.clear_profile_entry_form()
+        self.mentors = [dict(mentor) for mentor in self.profile_data.get("mentors", [])]
+        self.mentor_selected_id = ""
+        expired_count, cleared_count = self.expire_unknown_mentors()
+        self.refresh_mentor_tree()
+        self.clear_mentor_form()
+        self.refresh_advisor_options()
         formatted_text = safe_text(self.profile_data.get("formatted_text"))
         self.profile_last_generated_text = safe_text(self.profile_data.get("formatted_source"))
         self.set_plain_text_widget(self.profile_formatted_text, formatted_text)
         self.load_statement_workspace()
         self.profile_workspace_loaded = True
+        if expired_count:
+            self.persist_profile_workspace(show_error=False)
+            self.update_status(
+                f"{expired_count} 位未知导师已满 7 天并转为失败，清空 {cleared_count} 个项目的意向导师"
+            )
 
     def save_profile_panel(self) -> None:
         if self.profile_text is None:
+            return
+        if not messagebox.askyesno(
+            "确认保存",
+            "确定保存当前基础资料吗？保存后将覆盖上一次内容。",
+            parent=self,
+        ):
             return
         try:
             PERSONAL_PROFILE_PATH.write_text(dump_rich_text(self.profile_text).rstrip() + "\n", encoding="utf-8")
@@ -7179,7 +7701,12 @@ class SummerCampPlanner(tk.Tk):
     def profile_workspace_payload(self) -> dict:
         payload = dict(self.profile_data)
         payload["entries"] = [dict(entry) for entry in self.profile_entries]
-        payload["formatted_text"] = self.get_plain_text_widget(self.profile_formatted_text)
+        payload["mentors"] = [dict(mentor) for mentor in self.mentors]
+        payload["formatted_text"] = (
+            self.get_plain_text_widget(self.profile_formatted_text)
+            if self.profile_formatted_text is not None
+            else safe_text(self.profile_data.get("formatted_text"))
+        )
         payload["formatted_source"] = self.profile_last_generated_text
         payload["statement"] = self.profile_statement_payload()
         return normalize_profile_data(payload)
@@ -7197,12 +7724,421 @@ class SummerCampPlanner(tk.Tk):
     def get_plain_text_widget(self, widget: tk.Text | None) -> str:
         return widget.get("1.0", "end-1c") if widget is not None else ""
 
+    def filtered_mentors(self) -> list[dict]:
+        result = []
+        for mentor in self.mentors:
+            if self.mentor_filter_status and safe_text(mentor.get("status")) != self.mentor_filter_status:
+                continue
+            if self.mentor_filter_text and self.mentor_filter_field:
+                searchable = safe_text(mentor.get(self.mentor_filter_field)).casefold()
+                if self.mentor_filter_text.casefold() not in searchable:
+                    continue
+            result.append(mentor)
+        status_rank = {"成功": 0, "待定": 1, "未知": 2, "失败": 3}
+        return sorted(
+            result,
+            key=lambda item: (
+                safe_text(item.get("status")) == "失败",
+                safe_text(item.get("school")),
+                status_rank.get(safe_text(item.get("status")), 9),
+                safe_text(item.get("college")),
+                safe_text(item.get("name")),
+            ),
+        )
+
+    def update_mentor_headings(self) -> None:
+        if self.mentor_tree is None:
+            return
+        name_title = "导师"
+        school_title = "学校"
+        if self.mentor_filter_field == "name" and self.mentor_filter_text:
+            name_title = f"导师：{self.mentor_filter_text}"
+        if self.mentor_filter_field == "school" and self.mentor_filter_text:
+            school_title = f"学校：{self.mentor_filter_text}"
+        status_title = "状态" if not self.mentor_filter_status else f"状态：{self.mentor_filter_status}"
+        self.mentor_tree.heading("name", text=name_title, command=lambda: self.show_mentor_search("name"))
+        self.mentor_tree.heading("school", text=school_title, command=lambda: self.show_mentor_search("school"))
+        self.mentor_tree.heading("status", text=status_title, command=self.cycle_mentor_status_filter)
+
+    def show_mentor_search(self, field: str) -> None:
+        if self.mentor_search_bar is None or field not in {"name", "school"}:
+            return
+        self.mentor_search_field = field
+        existing = self.mentor_filter_text if self.mentor_filter_field == field else ""
+        self.mentor_search_var.set(existing)
+        if self.mentor_search_label is not None:
+            self.mentor_search_label.configure(text="搜索导师" if field == "name" else "搜索学校")
+        self.mentor_search_bar.grid(row=1, column=0, sticky="ew", pady=(0, 7))
+        for child in self.mentor_search_bar.winfo_children():
+            if isinstance(child, ttk.Entry):
+                child.focus_set()
+                child.selection_range(0, "end")
+                break
+
+    def apply_mentor_text_filter(self) -> None:
+        if self.mentor_search_field not in {"name", "school"}:
+            return
+        self.mentor_filter_field = self.mentor_search_field
+        self.mentor_filter_text = self.mentor_search_var.get().strip()
+        self.refresh_mentor_tree()
+
+    def clear_mentor_text_filter(self) -> None:
+        self.mentor_filter_field = ""
+        self.mentor_filter_text = ""
+        self.mentor_search_field = ""
+        self.mentor_search_var.set("")
+        if self.mentor_search_bar is not None:
+            self.mentor_search_bar.grid_remove()
+        self.refresh_mentor_tree()
+
+    def cycle_mentor_status_filter(self) -> None:
+        options = ["", *MENTOR_STATUS_OPTIONS]
+        index = options.index(self.mentor_filter_status) if self.mentor_filter_status in options else 0
+        self.mentor_filter_status = options[(index + 1) % len(options)]
+        self.refresh_mentor_tree()
+
+    def mentor_status_display(self, mentor: dict) -> str:
+        status = safe_text(mentor.get("status"))
+        if status != "未知":
+            return status
+        remaining = unknown_mentor_days_remaining(mentor)
+        return f"未知（剩{remaining}天）" if remaining is not None else status
+
+    def on_mentor_tree_click(self, event) -> None:
+        if self.mentor_tree is None or self.mentor_tree.identify_region(event.x, event.y) == "heading":
+            return
+        if not self.mentor_tree.identify_row(event.y):
+            self.after_idle(self.clear_mentor_form)
+
+    def refresh_mentor_tree(self, select_id: str = "") -> None:
+        if self.mentor_tree is None:
+            return
+        self.update_mentor_headings()
+        for item in self.mentor_tree.get_children():
+            self.mentor_tree.delete(item)
+        tag_map = {
+            "成功": "mentor_success",
+            "待定": "mentor_pending",
+            "未知": "mentor_unknown",
+            "失败": "mentor_failed",
+        }
+        for mentor in self.filtered_mentors():
+            mentor_id = safe_text(mentor.get("id"))
+            self.mentor_tree.insert(
+                "",
+                "end",
+                iid=mentor_id,
+                values=(
+                    mentor.get("name"),
+                    mentor.get("school"),
+                    mentor.get("college"),
+                    self.mentor_status_display(mentor),
+                ),
+                tags=(tag_map.get(safe_text(mentor.get("status")), ""),),
+            )
+        selected = select_id or self.mentor_selected_id
+        if selected and self.mentor_tree.exists(selected):
+            self.mentor_tree.selection_set(selected)
+            self.mentor_tree.see(selected)
+
+    def clear_mentor_form(self) -> None:
+        self.mentor_selected_id = ""
+        for key, variable in self.mentor_vars.items():
+            variable.set("未知" if key == "status" else "")
+        self.set_plain_text_widget(self.mentor_notes_text, "")
+        if self.mentor_tree is not None:
+            self.mentor_tree.selection_remove(self.mentor_tree.selection())
+        self.set_mentor_new_button_visible(False)
+
+    def set_mentor_new_button_visible(self, visible: bool) -> None:
+        if self.mentor_save_button is not None:
+            self.mentor_save_button.configure(text="更新" if visible else "保存导师")
+        if self.mentor_new_button is None:
+            return
+        if visible:
+            if not self.mentor_new_button.winfo_manager():
+                self.mentor_new_button.pack(side="right")
+        else:
+            self.mentor_new_button.pack_forget()
+
+    def on_mentor_tree_select(self, _event=None) -> None:
+        if self.mentor_tree is None:
+            return
+        selection = self.mentor_tree.selection()
+        if not selection:
+            return
+        mentor_id = safe_text(selection[0])
+        mentor = next((item for item in self.mentors if item.get("id") == mentor_id), None)
+        if not mentor:
+            return
+        self.mentor_selected_id = mentor_id
+        for key, variable in self.mentor_vars.items():
+            variable.set(safe_text(mentor.get(key)))
+        self.set_plain_text_widget(self.mentor_notes_text, mentor.get("notes"))
+        self.set_mentor_new_button_visible(True)
+
+    def clear_camp_advisor_links_for_mentor(self, mentor: dict, *, refresh: bool = True) -> list[int]:
+        camp_ids = self.db.clear_advisor_for_mentor(mentor.get("school"), mentor.get("name"))
+        if not camp_ids:
+            return []
+        if (
+            self.vars.get("advisor") is not None
+            and self.vars["advisor"].get().strip().casefold() == safe_text(mentor.get("name")).strip().casefold()
+            and school_names_match(self.vars.get("school").get() if self.vars.get("school") else "", mentor.get("school"))
+        ):
+            self.vars["advisor"].set("")
+        if refresh:
+            self.camps = self.db.all_camps()
+            self.refresh_views()
+        return camp_ids
+
+    def expire_unknown_mentors(self) -> tuple[int, int]:
+        expired_count = 0
+        cleared_ids: set[int] = set()
+        timestamp = datetime.now().isoformat(timespec="seconds")
+        for index, mentor in enumerate(self.mentors):
+            if not unknown_mentor_expired(mentor):
+                continue
+            expired = normalize_mentor(
+                {
+                    **mentor,
+                    "status": "失败",
+                    "unknown_since": "",
+                    "updated_at": timestamp,
+                }
+            )
+            self.mentors[index] = expired
+            expired_count += 1
+            cleared_ids.update(self.clear_camp_advisor_links_for_mentor(expired, refresh=False))
+        if cleared_ids:
+            self.camps = self.db.all_camps()
+            self.refresh_views()
+        return expired_count, len(cleared_ids)
+
+    def save_mentor(self) -> None:
+        if not self.mentor_vars:
+            return
+        name = self.mentor_vars["name"].get().strip()
+        school = self.mentor_vars["school"].get().strip()
+        if not name or not school:
+            messagebox.showwarning("导师信息不完整", "请填写导师名称和学校。", parent=self)
+            return
+        existing = next((item for item in self.mentors if item.get("id") == self.mentor_selected_id), None)
+        duplicate = next(
+            (
+                item
+                for item in self.mentors
+                if item.get("id") != self.mentor_selected_id
+                and safe_text(item.get("name")).strip().casefold() == name.casefold()
+                and safe_text(item.get("school")).strip().casefold() == school.casefold()
+                and safe_text(item.get("college")).strip().casefold()
+                == self.mentor_vars["college"].get().strip().casefold()
+            ),
+            None,
+        )
+        if duplicate:
+            messagebox.showinfo("导师已存在", "同一学校和学院中已经有这位导师，请从上方列表选择后修改。", parent=self)
+            self.refresh_mentor_tree(select_id=safe_text(duplicate.get("id")))
+            return
+        timestamp = datetime.now().isoformat(timespec="seconds")
+        status = self.mentor_vars["status"].get().strip()
+        unknown_since = ""
+        if status == "未知":
+            unknown_since = (
+                safe_text(existing.get("unknown_since")).strip()
+                if existing and safe_text(existing.get("status")) == "未知"
+                else timestamp
+            )
+        mentor = normalize_mentor(
+            {
+                **dict(existing or {}),
+                "id": existing.get("id") if existing else new_profile_id(),
+                "name": name,
+                "school": school,
+                "college": self.mentor_vars["college"].get().strip(),
+                "status": status,
+                "notes": self.get_plain_text_widget(self.mentor_notes_text),
+                "unknown_since": unknown_since,
+                "updated_at": timestamp,
+            }
+        )
+        if existing:
+            self.mentors[self.mentors.index(existing)] = mentor
+        else:
+            self.mentors.append(mentor)
+        self.mentor_selected_id = mentor["id"]
+        cleared_count = 0
+        if mentor["status"] == "失败" and (not existing or safe_text(existing.get("status")) != "失败"):
+            cleared_count = len(self.clear_camp_advisor_links_for_mentor(mentor))
+        self.refresh_mentor_tree(select_id=mentor["id"])
+        self.set_mentor_new_button_visible(True)
+        self.refresh_advisor_options()
+        if self.persist_profile_workspace():
+            message = "导师信息已保存"
+            if cleared_count:
+                message += f"，并清空 {cleared_count} 个项目的意向导师"
+            self.update_status(message)
+
+    def delete_mentor(self) -> None:
+        if not self.mentor_selected_id:
+            messagebox.showinfo("未选择导师", "请先选择要删除的导师。", parent=self)
+            return
+        mentor = next((item for item in self.mentors if item.get("id") == self.mentor_selected_id), None)
+        if not mentor:
+            return
+        if not messagebox.askyesno("确认删除", f"删除导师“{safe_text(mentor.get('name'))}”？", parent=self):
+            return
+        self.mentors = [item for item in self.mentors if item.get("id") != self.mentor_selected_id]
+        self.clear_mentor_form()
+        self.refresh_mentor_tree()
+        self.refresh_advisor_options()
+        if self.persist_profile_workspace():
+            self.update_status("导师信息已删除")
+
+    def refresh_advisor_options(self) -> None:
+        if self.advisor_combo is None or "school" not in self.vars:
+            return
+        mentors = active_mentors_for_school(self.mentors, self.vars["school"].get())
+        option_map: dict[str, dict] = {}
+        counts: dict[str, int] = {}
+        for mentor in mentors:
+            name = safe_text(mentor.get("name")).strip()
+            college = mentor_college_short_name(mentor.get("college"))
+            base = f"{name}（{college}）" if college else name
+            counts[base] = counts.get(base, 0) + 1
+            label = base if counts[base] == 1 else f"{base} · {mentor.get('status')}"
+            suffix = 2
+            while label in option_map:
+                label = f"{base} · {mentor.get('status')} {suffix}"
+                suffix += 1
+            option_map[label] = mentor
+        self.advisor_option_map = option_map
+        self.advisor_combo.configure(values=list(option_map))
+
+    def on_advisor_selected(self, _event=None) -> None:
+        selected = self.vars.get("advisor").get().strip() if self.vars.get("advisor") else ""
+        mentor = self.advisor_option_map.get(selected)
+        if mentor:
+            self.vars["advisor"].set(safe_text(mentor.get("name")))
+
+    def open_quick_mentor_dialog(self) -> None:
+        dialog = tk.Toplevel(self)
+        dialog.title("添加意向导师")
+        dialog.transient(self)
+        dialog.resizable(False, False)
+        dialog.configure(bg=APP_BG)
+        container = ttk.Frame(dialog, padding=14, style="Panel.TFrame")
+        container.pack(fill="both", expand=True)
+        container.columnconfigure(1, weight=1)
+        variables = {
+            "name": tk.StringVar(value=self.vars.get("advisor", tk.StringVar()).get().strip()),
+            "school": tk.StringVar(value=self.vars.get("school", tk.StringVar()).get().strip()),
+            "college": tk.StringVar(value=self.vars.get("college", tk.StringVar()).get().strip()),
+            "status": tk.StringVar(value="未知"),
+        }
+        rows = (("name", "导师名称"), ("school", "学校"), ("college", "学院"))
+        name_entry = None
+        for row, (key, label) in enumerate(rows):
+            ttk.Label(container, text=label, style="Panel.TLabel").grid(row=row, column=0, sticky="w", padx=(0, 8), pady=4)
+            entry = ttk.Entry(container, width=38, textvariable=variables[key])
+            entry.grid(row=row, column=1, sticky="ew", pady=4)
+            if key == "name":
+                name_entry = entry
+        ttk.Label(container, text="状态", style="Panel.TLabel").grid(row=3, column=0, sticky="w", padx=(0, 8), pady=4)
+        ttk.Combobox(
+            container,
+            textvariable=variables["status"],
+            values=MENTOR_STATUS_OPTIONS,
+        ).grid(row=3, column=1, sticky="ew", pady=4)
+        ttk.Label(container, text="备注", style="Panel.TLabel").grid(row=4, column=0, sticky="nw", padx=(0, 8), pady=4)
+        notes_text = tk.Text(container, width=38, height=5, wrap="word", undo=True)
+        apply_text_widget_theme(notes_text)
+        notes_text.grid(row=4, column=1, sticky="ew", pady=4)
+
+        def save_quick_mentor() -> None:
+            name = variables["name"].get().strip()
+            school = variables["school"].get().strip()
+            college = variables["college"].get().strip()
+            if not name or not school:
+                messagebox.showwarning("导师信息不完整", "请填写导师名称和学校。", parent=dialog)
+                return
+            duplicate = next(
+                (
+                    item
+                    for item in self.mentors
+                    if safe_text(item.get("name")).strip().casefold() == name.casefold()
+                    and safe_text(item.get("school")).strip().casefold() == school.casefold()
+                    and safe_text(item.get("college")).strip().casefold() == college.casefold()
+                ),
+                None,
+            )
+            timestamp = datetime.now().isoformat(timespec="seconds")
+            status = variables["status"].get()
+            unknown_since = ""
+            if status == "未知":
+                unknown_since = (
+                    safe_text(duplicate.get("unknown_since")).strip()
+                    if duplicate and safe_text(duplicate.get("status")) == "未知"
+                    else timestamp
+                )
+            mentor = normalize_mentor(
+                {
+                    **dict(duplicate or {}),
+                    "id": duplicate.get("id") if duplicate else new_profile_id(),
+                    "name": name,
+                    "school": school,
+                    "college": college,
+                    "status": status,
+                    "notes": notes_text.get("1.0", "end-1c"),
+                    "unknown_since": unknown_since,
+                    "updated_at": timestamp,
+                }
+            )
+            if duplicate:
+                self.mentors[self.mentors.index(duplicate)] = mentor
+            else:
+                self.mentors.append(mentor)
+            if mentor["status"] == "失败" and (
+                not duplicate or safe_text(duplicate.get("status")) != "失败"
+            ):
+                self.clear_camp_advisor_links_for_mentor(mentor)
+            self.vars["advisor"].set("" if mentor["status"] == "失败" else name)
+            self.refresh_mentor_tree(select_id=mentor["id"])
+            self.refresh_advisor_options()
+            if not self.persist_profile_workspace():
+                return
+            self.update_status("意向导师已添加到导师管理")
+            dialog.destroy()
+
+        actions = ttk.Frame(container, style="Panel.TFrame")
+        actions.grid(row=5, column=0, columnspan=2, sticky="e", pady=(10, 0))
+        ttk.Button(actions, text="取消", command=dialog.destroy).pack(side="left", padx=(0, 7))
+        ttk.Button(actions, text="保存并使用", style="Accent.TButton", command=save_quick_mentor).pack(side="left")
+        dialog.bind("<Escape>", lambda _event: dialog.destroy())
+        dialog.update_idletasks()
+        dialog.geometry(f"+{self.winfo_rootx() + 80}+{self.winfo_rooty() + 90}")
+        dialog.grab_set()
+        if name_entry is not None:
+            name_entry.focus_set()
+
     def clear_profile_entry_form(self) -> None:
         self.profile_selected_entry_id = ""
         for variable in self.profile_entry_vars.values():
             variable.set("")
         if self.profile_entry_tree is not None:
             self.profile_entry_tree.selection_remove(self.profile_entry_tree.selection())
+        self.set_profile_entry_new_button_visible(False)
+
+    def set_profile_entry_new_button_visible(self, visible: bool) -> None:
+        if self.profile_entry_save_button is not None:
+            self.profile_entry_save_button.configure(text="更新" if visible else "保存条目")
+        if self.profile_entry_new_button is None:
+            return
+        if visible:
+            if not self.profile_entry_new_button.winfo_manager():
+                self.profile_entry_new_button.pack(side="left", padx=(7, 0))
+        else:
+            self.profile_entry_new_button.pack_forget()
 
     def save_profile_entry(self) -> None:
         if not self.profile_entry_vars:
@@ -7235,6 +8171,7 @@ class SummerCampPlanner(tk.Tk):
             self.profile_entries.append(entry)
         self.profile_selected_entry_id = entry["id"]
         self.refresh_profile_entry_tree(select_id=entry["id"])
+        self.set_profile_entry_new_button_visible(True)
         self.sync_profile_formatted_after_entries_change()
         if self.persist_profile_workspace():
             self.update_status("经历条目已保存")
@@ -7270,8 +8207,17 @@ class SummerCampPlanner(tk.Tk):
         self.profile_selected_entry_id = entry_id
         for key, variable in self.profile_entry_vars.items():
             variable.set(safe_text(entry.get(key)))
+        self.set_profile_entry_new_button_visible(True)
 
-    def show_profile_entry_menu(self, anchor: tk.Widget) -> None:
+    def show_profile_entry_menu(self, event):
+        if self.profile_entry_tree is None:
+            return "break"
+        entry_id = self.profile_entry_tree.identify_row(event.y)
+        if not entry_id:
+            return "break"
+        self.profile_entry_tree.selection_set(entry_id)
+        self.profile_entry_tree.focus(entry_id)
+        self.on_profile_entry_select()
         menu = tk.Menu(
             self,
             tearoff=False,
@@ -7288,9 +8234,10 @@ class SummerCampPlanner(tk.Tk):
         menu.add_command(label="上移", command=lambda: self.move_profile_entry(-1))
         menu.add_command(label="下移", command=lambda: self.move_profile_entry(1))
         try:
-            menu.tk_popup(anchor.winfo_rootx(), anchor.winfo_rooty() + anchor.winfo_height())
+            menu.tk_popup(event.x_root, event.y_root)
         finally:
             menu.grab_release()
+        return "break"
 
     def delete_profile_entry(self) -> None:
         if not self.profile_selected_entry_id:
@@ -8434,6 +9381,12 @@ class SummerCampPlanner(tk.Tk):
         self.focus_chat_input(force=True)
         return "break"
 
+    def on_chat_input_pointer_press(self, _event=None) -> None:
+        # Let Tk's Text binding place the caret or extend a drag selection.
+        # Pending conversation-focus retries must not move it back to the end.
+        self.cancel_chat_input_focus_jobs()
+        self.clear_chat_input_placeholder()
+
     def cancel_chat_input_focus_jobs(self) -> None:
         for job_id in self.chat_input_focus_jobs:
             try:
@@ -8466,6 +9419,7 @@ class SummerCampPlanner(tk.Tk):
         if self.chat_input_text is None or self.ai_busy:
             return
         try:
+            already_focused = self.focus_get() is self.chat_input_text
             self.chat_input_text.configure(state="normal")
             self.clear_chat_input_placeholder()
             self.update_idletasks()
@@ -8473,8 +9427,9 @@ class SummerCampPlanner(tk.Tk):
                 self.chat_input_text.focus_force()
             else:
                 self.chat_input_text.focus_set()
-            self.chat_input_text.mark_set("insert", "end-1c")
-            self.chat_input_text.see("insert")
+            if not already_focused:
+                self.chat_input_text.mark_set("insert", "end-1c")
+                self.chat_input_text.see("insert")
         except tk.TclError:
             pass
 
@@ -8832,13 +9787,8 @@ class SummerCampPlanner(tk.Tk):
     def close_profile_panel(self) -> None:
         if not self.confirm_statement_changes():
             return
-        if self.profile_tab is not None:
-            try:
-                self.notebook.hide(self.profile_tab)
-            except (tk.TclError, RuntimeError):
-                pass
-        if self.form_tab is not None:
-            self.notebook.select(self.form_tab)
+        if self.school_list_tab is not None:
+            self.notebook.select(self.school_list_tab)
 
     def ensure_ai_ready(self) -> bool:
         api_url = normalize_chat_url(os.environ.get("SUMMER_CAMP_AI_API_URL") or safe_text(self.settings.get("api_url")).strip())
@@ -8969,7 +9919,7 @@ class SummerCampPlanner(tk.Tk):
                     personal_profile = PERSONAL_PROFILE_PATH.read_text(encoding="utf-8")
                 profile_data = load_profile_data(PERSONAL_PROFILE_DATA_PATH)
             payload = {
-                "version": 4,
+                "version": 5,
                 "app": APP_NAME,
                 "exported_at": now_text(),
                 "camps": [
@@ -9474,6 +10424,75 @@ def run_self_test() -> None:
             "rank",
             "order",
         }
+        mentor_records = [
+            normalize_mentor(
+                {
+                    "id": "mentor-success",
+                    "name": "小文",
+                    "school": "示例大学",
+                    "college": "信息学院",
+                    "status": "成功",
+                    "notes": "夏令营联系",
+                }
+            ),
+            normalize_mentor(
+                {
+                    "id": "mentor-pending",
+                    "name": "小卓",
+                    "school": "示例大学",
+                    "college": "卓越工程师学院",
+                    "status": "待定",
+                }
+            ),
+            normalize_mentor(
+                {
+                    "id": "mentor-failed",
+                    "name": "小失",
+                    "school": "示例大学",
+                    "college": "信息学院",
+                    "status": "失败",
+                }
+            ),
+            normalize_mentor(
+                {
+                    "id": "mentor-unknown",
+                    "name": "小未",
+                    "school": "示例大学",
+                    "college": "人工智能学院",
+                    "status": "未知",
+                    "unknown_since": "2026-07-01T10:00:00",
+                }
+            ),
+            normalize_mentor(
+                {
+                    "id": "mentor-other",
+                    "name": "小外",
+                    "school": "其他大学",
+                    "college": "信息学院",
+                    "status": "成功",
+                }
+            ),
+        ]
+        assert mentor_college_short_name("信息学院") == "信息"
+        assert mentor_college_short_name("卓越工程师学院") == "卓越工程"
+        active_mentor_names = [item["name"] for item in active_mentors_for_school(mentor_records, "示例大学")]
+        assert active_mentor_names == ["小文", "小卓", "小未"]
+        assert normalize_mentor({"status": "未知"})["status"] == "未知"
+        assert unknown_mentor_days_remaining(mentor_records[3], date(2026, 7, 7)) == 1
+        assert unknown_mentor_expired(mentor_records[3], date(2026, 7, 7)) is False
+        assert unknown_mentor_expired(mentor_records[3], date(2026, 7, 8)) is True
+        mentor_sort_app = object.__new__(SummerCampPlanner)
+        mentor_sort_app.mentors = mentor_records
+        mentor_sort_app.mentor_filter_status = ""
+        mentor_sort_app.mentor_filter_field = ""
+        mentor_sort_app.mentor_filter_text = ""
+        sorted_mentors = SummerCampPlanner.filtered_mentors(mentor_sort_app)
+        assert sorted_mentors[-1]["status"] == "失败"
+        assert [
+            item["status"] for item in sorted_mentors if item["school"] == "示例大学" and item["status"] != "失败"
+        ] == ["成功", "待定", "未知"]
+        legacy_profile = normalize_profile_data({"schema_version": 2, "entries": [], "mentors": mentor_records})
+        assert legacy_profile["schema_version"] == 4 and len(legacy_profile["mentors"]) == 5
         invalid_targets = normalize_profile_data(
             {"statement": {"conversations": [{"target_min": "无效", "target_max": object()}]}}
         )["statement"]["conversations"][0]
@@ -9497,15 +10516,17 @@ def run_self_test() -> None:
         profile_data_path = tmp_path / "personal_profile_data.json"
         saved_profile = save_profile_data(
             profile_data_path,
-            {"entries": [profile_entry], "statement": conversation_data},
+            {"entries": [profile_entry], "mentors": mentor_records, "statement": conversation_data},
         )
         assert load_profile_data(profile_data_path)["entries"] == saved_profile["entries"]
+        assert load_profile_data(profile_data_path)["mentors"] == saved_profile["mentors"]
         assert load_profile_data(profile_data_path)["statement"]["conversations"][0]["title"] == "科研经历陈述"
         backup_roundtrip = json.loads(
             json.dumps(
                 {
                     "version": 3,
                     "personal_profile_data": {
+                        "mentors": mentor_records,
                         "statement": {
                             "current_conversation_id": "chat-2",
                             "conversations": [
@@ -9529,6 +10550,8 @@ def run_self_test() -> None:
         assert restored_chats["current_conversation_id"] == "chat-2"
         assert len(restored_chats["conversations"]) == 2
         assert restored_chats["conversations"][1]["messages"][1]["attachments"] == ["简历.pdf"]
+        restored_mentors = normalize_profile_data(backup_roundtrip["personal_profile_data"])["mentors"]
+        assert [item["name"] for item in restored_mentors] == ["小文", "小卓", "小失", "小未", "小外"]
         docx_path = tmp_path / "reference.docx"
         with zipfile.ZipFile(docx_path, "w") as archive:
             archive.writestr(
@@ -9570,12 +10593,15 @@ def run_self_test() -> None:
                     "camp_end": normalize_date("7.15", default_year=2026),
                     "camp_format": "线上或线下",
                     "camp_address": "四川大学计算机学院",
+                    "advisor": "测试导师",
                     "status": "待确认",
                     "priority": "普通",
                     "notes": "测试",
                 }
             )
             assert db.get(camp_id)["school"] == "四川大学"
+            assert db.clear_advisor_for_mentor("四川大学", "测试导师") == [camp_id]
+            assert db.get(camp_id)["advisor"] == ""
             assert split_date_range("7.13-7.15", 2026) == ("2026-07-13", "2026-07-15")
             assert split_date_range("2026年7月13日至15日") == ("2026-07-13", "2026-07-15")
             assert normalize_date_field_value('6月30日左右”，result_date提取为2026-06-30', 2026)[0] == "2026-06-30"
@@ -9617,12 +10643,17 @@ def run_self_test() -> None:
                     "signup_end": (today + timedelta(days=3)).isoformat(),
                 },
             ]
-            calendar_kinds = [span.kind for span in SummerCampPlanner.collect_spans(dummy_app)]
+            calendar_spans = SummerCampPlanner.collect_spans(dummy_app)
+            calendar_kinds = [span.kind for span in calendar_spans]
             assert "signup" not in calendar_kinds
             assert "signup_start" in calendar_kinds
             assert "pending_signup" in calendar_kinds
             assert calendar_kinds.count("signup_deadline") == 2
             assert "result" in calendar_kinds and "camp" in calendar_kinds
+            pending_span = next(span for span in calendar_spans if span.camp_id == 102 and span.kind == "pending_signup")
+            registered_span = next(span for span in calendar_spans if span.camp_id == 101 and span.kind == "signup_start")
+            assert pending_span.start == pending_span.end == today
+            assert registered_span.start == registered_span.end == today
             signup_items = SummerCampPlanner.upcoming_items(
                 dummy_app,
                 {

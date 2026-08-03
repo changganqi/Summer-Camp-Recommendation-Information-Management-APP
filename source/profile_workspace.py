@@ -24,8 +24,9 @@ except Exception:  # pragma: no cover - checked when a PDF template is selected.
     PdfReader = None
 
 
-PROFILE_SCHEMA_VERSION = 2
+PROFILE_SCHEMA_VERSION = 4
 PROFILE_ENTRY_FIELDS = ("id", "date", "organization", "project", "rank", "order")
+MENTOR_STATUS_OPTIONS = ("成功", "待定", "未知", "失败")
 MAX_REFERENCE_TEXT_CHARS = 50000
 MAX_REFERENCE_IMAGE_BYTES = 30 * 1024 * 1024
 
@@ -46,6 +47,7 @@ def empty_profile_data() -> dict:
     return {
         "schema_version": PROFILE_SCHEMA_VERSION,
         "entries": [],
+        "mentors": [],
         "formatted_text": "",
         "formatted_source": "",
         "statement": {
@@ -97,6 +99,31 @@ def normalize_entry(raw: object, fallback_order: int = 0) -> dict:
         "project": safe_text(source.get("project")).strip(),
         "rank": safe_text(source.get("rank")).strip(),
         "order": order,
+    }
+
+
+def normalize_mentor(raw: object) -> dict:
+    source = raw if isinstance(raw, dict) else {}
+    status = safe_text(source.get("status")).strip()
+    if status not in MENTOR_STATUS_OPTIONS:
+        status = "待定"
+    created_at = safe_text(source.get("created_at")).strip() or now_iso()
+    updated_at = safe_text(source.get("updated_at")).strip() or created_at
+    unknown_since = safe_text(source.get("unknown_since")).strip()
+    if status == "未知":
+        unknown_since = unknown_since or updated_at or created_at
+    else:
+        unknown_since = ""
+    return {
+        "id": safe_text(source.get("id")).strip() or new_id(),
+        "name": safe_text(source.get("name")).strip(),
+        "school": safe_text(source.get("school")).strip(),
+        "college": safe_text(source.get("college")).strip(),
+        "status": status,
+        "notes": safe_text(source.get("notes")).strip(),
+        "unknown_since": unknown_since,
+        "created_at": created_at,
+        "updated_at": updated_at,
     }
 
 
@@ -178,6 +205,8 @@ def normalize_profile_data(raw: object) -> dict:
     for index, entry in enumerate(normalized_entries):
         entry["order"] = index
     result["entries"] = normalized_entries
+    mentors = raw.get("mentors") if isinstance(raw.get("mentors"), list) else []
+    result["mentors"] = [normalize_mentor(mentor) for mentor in mentors if isinstance(mentor, dict)]
     result["formatted_text"] = safe_text(raw.get("formatted_text"))
     result["formatted_source"] = safe_text(raw.get("formatted_source"))
 

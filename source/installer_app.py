@@ -14,7 +14,7 @@ from license_keys import activate_license, fetch_network_datetime, validate_key_
 
 APP_NAME = "夏令营日程助手"
 APP_PUBLISHER = "夏令营日程助手"
-APP_VERSION = "1.4.2"
+APP_VERSION = "1.5.1"
 APP_REG_KEY = r"Software\Microsoft\Windows\CurrentVersion\Uninstall\SummerCampPlanner"
 INSTALL_FOLDER_NAME = "夏令营日程助手"
 INSTALL_MARKER_NAME = ".summer_camp_planner_install"

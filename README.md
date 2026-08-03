@@ -67,4 +67,4 @@ python -X utf8 build_release.py
 
 macOS 由 GitHub Actions 在 `macos-14` 环境构建 DMG。构建仓库只保存源码、工作流、资源和文档，不提交本机数据库、配置文件、个人资料、密钥或构建缓存。
 
-完整源码备份见 [Summer-Camp-Recommendation-Information-Management-System](https://github.com/changganqi/Summer-Camp-Recommendation-Information-Management-System)。
+激活码见小黄鱼号：满天星的。

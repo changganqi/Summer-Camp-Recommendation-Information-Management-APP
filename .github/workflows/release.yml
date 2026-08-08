@@ -54,6 +54,7 @@ jobs:
 
       - name: Install dependencies
         run: |
+          choco install innosetup --no-progress -y
           python -m pip install --upgrade pip
           python -m pip install pyinstaller playwright certifi pillow pypdf
           python -m playwright install chromium

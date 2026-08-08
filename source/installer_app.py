@@ -68,6 +68,27 @@ def resource_dir() -> Path:
     return Path(__file__).resolve().parent
 
 
+def payload_root() -> Path:
+    candidates = [resource_dir()]
+    if getattr(sys, "frozen", False):
+        executable_dir = Path(sys.executable).resolve().parent
+        candidates.extend((executable_dir, executable_dir.parent))
+    candidates.append(Path(__file__).resolve().parent)
+
+    seen: set[Path] = set()
+    for candidate in candidates:
+        try:
+            resolved = candidate.resolve()
+        except OSError:
+            continue
+        if resolved in seen:
+            continue
+        seen.add(resolved)
+        if (resolved / "app_bundle").is_dir():
+            return resolved
+    return resource_dir()
+
+
 def apply_app_icon(window: tk.Misc) -> None:
     icon_path = resource_dir() / "assets" / "app.ico"
     if icon_path.exists():
@@ -258,7 +279,8 @@ class Installer(tk.Tk):
             self.reset_after_failure()
             return
         self.set_progress(28, "正在安装，请稍候...")
-        source = resource_dir() / "app_bundle"
+        package_root = payload_root()
+        source = package_root / "app_bundle"
         if not source.exists():
             messagebox.showerror("安装失败", "安装包缺少 app_bundle。", parent=self)
             self.reset_after_failure()
@@ -280,7 +302,7 @@ class Installer(tk.Tk):
                     shutil.copy2(item, dest)
                 self.set_progress(45 + int(index / total * 25), "正在安装，请稍候...")
 
-            uninstaller = resource_dir() / "uninstall_app.exe"
+            uninstaller = package_root / "uninstall_app.exe"
             if uninstaller.exists():
                 shutil.copy2(uninstaller, target / UNINSTALL_EXE_NAME)
 

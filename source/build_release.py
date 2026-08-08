@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import ast
 import os
 import shutil
 import subprocess
@@ -11,6 +12,8 @@ ROOT = Path(__file__).resolve().parent
 DIST = ROOT / "release"
 APP_BUNDLE = DIST / "app_bundle"
 ICON = ROOT / "assets" / "app.ico"
+INSTALLER_RUNTIME_NAME = "SummerCampPlannerInstaller"
+INSTALLER_OUTPUT_NAME = "SummerCampPlannerSetup.exe"
 FORBIDDEN_RELEASE_NAMES = {
     "settings.json",
     "summer_camps.sqlite3",
@@ -63,6 +66,99 @@ def run(cmd: list[str]) -> None:
 def run_with_env(cmd: list[str], env: dict[str, str]) -> None:
     print("$", " ".join(cmd))
     subprocess.run(cmd, cwd=ROOT, env=env, check=True)
+
+
+def read_string_constant(source: Path, name: str) -> str:
+    tree = ast.parse(source.read_text(encoding="utf-8"), filename=str(source))
+    for node in tree.body:
+        if not isinstance(node, ast.Assign) or len(node.targets) != 1:
+            continue
+        target = node.targets[0]
+        if isinstance(target, ast.Name) and target.id == name and isinstance(node.value, ast.Constant):
+            if isinstance(node.value.value, str):
+                return node.value.value
+    raise RuntimeError(f"没有在 {source.name} 中找到字符串常量 {name}")
+
+
+def find_inno_setup_compiler() -> Path:
+    configured = os.environ.get("INNO_SETUP_COMPILER", "").strip()
+    local_app_data = os.environ.get("LOCALAPPDATA", "").strip()
+    candidates = [
+        Path(configured) if configured else None,
+        Path(shutil.which("ISCC.exe")) if shutil.which("ISCC.exe") else None,
+        Path(local_app_data) / "Programs" / "Inno Setup 6" / "ISCC.exe" if local_app_data else None,
+        Path(os.environ.get("ProgramFiles(x86)", "C:/Program Files (x86)")) / "Inno Setup 6" / "ISCC.exe",
+        Path(os.environ.get("ProgramFiles", "C:/Program Files")) / "Inno Setup 6" / "ISCC.exe",
+    ]
+    for candidate in candidates:
+        if candidate is not None and candidate.is_file():
+            return candidate.resolve()
+    raise RuntimeError(
+        "缺少 Inno Setup 6，无法生成可靠的 Windows 安装包。\n"
+        "请先运行：winget install --exact --id JRSoftware.InnoSetup"
+    )
+
+
+def build_inno_installer(installer_runtime: Path, uninstaller: Path) -> Path:
+    app_name = read_string_constant(ROOT / "installer_app.py", "APP_NAME")
+    app_publisher = read_string_constant(ROOT / "installer_app.py", "APP_PUBLISHER")
+    app_version = read_string_constant(ROOT / "installer_app.py", "APP_VERSION")
+    version_parts = app_version.split(".")
+    version_info = ".".join((version_parts + ["0"] * 4)[:4])
+    script_path = ROOT / "build" / "SummerCampPlannerSetup.iss"
+    script_path.parent.mkdir(parents=True, exist_ok=True)
+    script = f"""[Setup]
+AppName={app_name} 安装程序
+AppVersion={app_version}
+AppPublisher={app_publisher}
+DefaultDirName={{tmp}}\\SummerCampPlannerInstaller
+CreateAppDir=no
+Uninstallable=no
+PrivilegesRequired=lowest
+ArchitecturesAllowed=x64compatible
+OutputDir={ROOT / 'dist'}
+OutputBaseFilename=SummerCampPlannerSetup
+SetupIconFile={ICON}
+Compression=lzma2
+SolidCompression=yes
+WizardStyle=modern
+DisableWelcomePage=yes
+DisableDirPage=yes
+DisableProgramGroupPage=yes
+DisableReadyPage=yes
+DisableFinishedPage=yes
+DisableStartupPrompt=yes
+AllowCancelDuringInstall=no
+CloseApplications=no
+ShowLanguageDialog=no
+VersionInfoVersion={version_info}
+VersionInfoProductName={app_name}
+VersionInfoDescription={app_name} 安装程序
+VersionInfoCompany={app_publisher}
+
+[Files]
+Source: "{installer_runtime}\\*"; DestDir: "{{tmp}}\\installer_runtime"; Flags: ignoreversion recursesubdirs createallsubdirs deleteafterinstall
+Source: "{APP_BUNDLE}\\*"; DestDir: "{{tmp}}\\app_bundle"; Flags: ignoreversion recursesubdirs createallsubdirs deleteafterinstall
+Source: "{uninstaller}"; DestDir: "{{tmp}}"; Flags: ignoreversion deleteafterinstall
+
+[Run]
+Filename: "{{tmp}}\\installer_runtime\\{INSTALLER_RUNTIME_NAME}.exe"; WorkingDir: "{{tmp}}\\installer_runtime"; Flags: waituntilterminated
+
+[Code]
+procedure InitializeWizard;
+begin
+  WizardForm.StatusLabel.Visible := False;
+  WizardForm.FilenameLabel.Visible := False;
+  WizardForm.ProgressGauge.Top := WizardForm.StatusLabel.Top + ScaleY(8);
+end;
+"""
+    script_path.write_text(script, encoding="utf-8-sig")
+    compiler = find_inno_setup_compiler()
+    run([str(compiler), str(script_path)])
+    output = ROOT / "dist" / INSTALLER_OUTPUT_NAME
+    if not output.is_file():
+        raise RuntimeError("Inno Setup 没有生成 Windows 安装包：" + str(output))
+    return output
 
 
 def clean() -> None:
@@ -300,21 +396,21 @@ def build() -> None:
             "PyInstaller",
             "--noconfirm",
             "--windowed",
-            "--onefile",
             "--name",
-            "SummerCampPlannerSetup",
+            INSTALLER_RUNTIME_NAME,
             "--icon",
             str(ICON),
             "--add-data",
             f"{ROOT / 'assets'};assets",
-            "--add-data",
-            f"{APP_BUNDLE};app_bundle",
-            "--add-data",
-            f"{DIST / 'uninstall_app.exe'};.",
             "installer_app.py",
         ]
     )
-    shutil.copy2(ROOT / "dist" / "SummerCampPlannerSetup.exe", DIST / "SummerCampPlannerSetup.exe")
+    installer_runtime = ROOT / "dist" / INSTALLER_RUNTIME_NAME
+    installer_exe = installer_runtime / f"{INSTALLER_RUNTIME_NAME}.exe"
+    if not installer_exe.is_file():
+        raise RuntimeError("安装界面运行文件生成失败：" + str(installer_exe))
+    setup_exe = build_inno_installer(installer_runtime, DIST / "uninstall_app.exe")
+    shutil.copy2(setup_exe, DIST / INSTALLER_OUTPUT_NAME)
     tutorial = ROOT / "助手教程.pdf"
     if tutorial.exists() and not (DIST / tutorial.name).exists():
         shutil.copy2(tutorial, DIST / tutorial.name)

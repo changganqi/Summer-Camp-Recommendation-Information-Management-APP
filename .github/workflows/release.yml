@@ -26,6 +26,7 @@ jobs:
         uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ env.RELEASE_TAG }}
+          target_commitish: ${{ github.sha }}
           name: 夏令营日程助手 ${{ env.RELEASE_TAG }}
           body: |
             夏令营日程助手 ${{ env.RELEASE_TAG }} 安装包。

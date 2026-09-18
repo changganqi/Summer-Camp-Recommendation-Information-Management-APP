@@ -60,7 +60,18 @@ jobs:
           python -m playwright install chromium
 
       - name: Build Windows installer
-        run: python -X utf8 build_release.py
+        shell: pwsh
+        run: |
+          # Chromium 的深层目录会让 Inno Setup 超过 Windows 路径限制。
+          # 用临时盘符缩短构建根路径，上传步骤仍从工作区读取 release 文件。
+          subst R: "$env:GITHUB_WORKSPACE"
+          try {
+            Push-Location R:\source
+            python -X utf8 build_release.py
+          } finally {
+            Pop-Location
+            subst R: /d
+          }
 
       - name: Upload Windows installer
         uses: softprops/action-gh-release@v2

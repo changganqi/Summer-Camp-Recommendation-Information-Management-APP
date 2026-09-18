@@ -4,8 +4,10 @@ import os
 import shutil
 import subprocess
 import sys
+import time
 import tkinter as tk
 import winreg
+from base64 import b64encode
 from pathlib import Path
 from tkinter import filedialog, messagebox, ttk
 
@@ -21,6 +23,11 @@ INSTALL_MARKER_NAME = ".summer_camp_planner_install"
 SOURCE_EXE_NAME = "SummerCampPlanner.exe"
 APP_EXE_NAME = "夏令营日程助手.exe"
 UNINSTALL_EXE_NAME = "卸载夏令营日程助手.exe"
+INSTALLER_EXE_NAMES = {
+    "summercampplannersetup.exe",
+    "summercampplannersetup.tmp",
+    "summercampplannerinstaller.exe",
+}
 INSTALL_DIR_DATA_NAMES = {
     "settings.json",
     "summer_camps.sqlite3",
@@ -129,13 +136,230 @@ def clean_install_dir_private_files(install_dir: Path) -> None:
             pass
 
 
+def is_existing_install_dir(install_dir: Path) -> bool:
+    return (install_dir / INSTALL_MARKER_NAME).is_file() or any(
+        (install_dir / name).is_file() for name in (APP_EXE_NAME, SOURCE_EXE_NAME)
+    )
+
+
+def windows_processes_in_directory(directory: Path) -> list[tuple[int, Path]]:
+    if sys.platform != "win32" or not directory.exists():
+        return []
+
+    import ctypes
+    from ctypes import wintypes
+
+    class PROCESSENTRY32W(ctypes.Structure):
+        _fields_ = [
+            ("dwSize", wintypes.DWORD),
+            ("cntUsage", wintypes.DWORD),
+            ("th32ProcessID", wintypes.DWORD),
+            ("th32DefaultHeapID", ctypes.c_size_t),
+            ("th32ModuleID", wintypes.DWORD),
+            ("cntThreads", wintypes.DWORD),
+            ("th32ParentProcessID", wintypes.DWORD),
+            ("pcPriClassBase", wintypes.LONG),
+            ("dwFlags", wintypes.DWORD),
+            ("szExeFile", wintypes.WCHAR * 260),
+        ]
+
+    kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+    kernel32.CreateToolhelp32Snapshot.argtypes = (wintypes.DWORD, wintypes.DWORD)
+    kernel32.CreateToolhelp32Snapshot.restype = wintypes.HANDLE
+    kernel32.Process32FirstW.argtypes = (wintypes.HANDLE, ctypes.POINTER(PROCESSENTRY32W))
+    kernel32.Process32FirstW.restype = wintypes.BOOL
+    kernel32.Process32NextW.argtypes = (wintypes.HANDLE, ctypes.POINTER(PROCESSENTRY32W))
+    kernel32.Process32NextW.restype = wintypes.BOOL
+    kernel32.OpenProcess.argtypes = (wintypes.DWORD, wintypes.BOOL, wintypes.DWORD)
+    kernel32.OpenProcess.restype = wintypes.HANDLE
+    kernel32.QueryFullProcessImageNameW.argtypes = (
+        wintypes.HANDLE,
+        wintypes.DWORD,
+        wintypes.LPWSTR,
+        ctypes.POINTER(wintypes.DWORD),
+    )
+    kernel32.QueryFullProcessImageNameW.restype = wintypes.BOOL
+    kernel32.CloseHandle.argtypes = (wintypes.HANDLE,)
+
+    target = os.path.normcase(os.path.abspath(directory))
+    matches: list[tuple[int, Path]] = []
+    snapshot = kernel32.CreateToolhelp32Snapshot(0x00000002, 0)
+    if snapshot == wintypes.HANDLE(-1).value:
+        return matches
+    entry = PROCESSENTRY32W()
+    entry.dwSize = ctypes.sizeof(entry)
+    try:
+        has_entry = bool(kernel32.Process32FirstW(snapshot, ctypes.byref(entry)))
+        while has_entry:
+            pid = int(entry.th32ProcessID)
+            if pid and pid != os.getpid():
+                handle = kernel32.OpenProcess(0x1000, False, pid)
+                if handle:
+                    try:
+                        size = wintypes.DWORD(32768)
+                        buffer = ctypes.create_unicode_buffer(size.value)
+                        if kernel32.QueryFullProcessImageNameW(handle, 0, buffer, ctypes.byref(size)):
+                            if Path(buffer.value).name.casefold() in INSTALLER_EXE_NAMES:
+                                has_entry = bool(kernel32.Process32NextW(snapshot, ctypes.byref(entry)))
+                                continue
+                            process_path = os.path.normcase(os.path.abspath(buffer.value))
+                            try:
+                                inside_target = os.path.commonpath((target, process_path)) == target
+                            except ValueError:
+                                inside_target = False
+                            if inside_target:
+                                matches.append((pid, Path(buffer.value)))
+                    finally:
+                        kernel32.CloseHandle(handle)
+            has_entry = bool(kernel32.Process32NextW(snapshot, ctypes.byref(entry)))
+    finally:
+        kernel32.CloseHandle(snapshot)
+    return matches
+
+
+def close_running_install_processes(install_dir: Path) -> list[Path]:
+    processes = windows_processes_in_directory(install_dir)
+    if not processes:
+        return []
+
+    import ctypes
+    from ctypes import wintypes
+
+    user32 = ctypes.WinDLL("user32", use_last_error=True)
+    kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+    pids = {pid for pid, _path in processes}
+    callback_type = ctypes.WINFUNCTYPE(wintypes.BOOL, wintypes.HWND, wintypes.LPARAM)
+
+    @callback_type
+    def request_window_close(hwnd, _lparam):
+        pid = wintypes.DWORD()
+        user32.GetWindowThreadProcessId(hwnd, ctypes.byref(pid))
+        if int(pid.value) in pids:
+            user32.PostMessageW(hwnd, 0x0010, 0, 0)
+        return True
+
+    user32.EnumWindows(request_window_close, 0)
+    deadline = time.monotonic() + 4.0
+    while time.monotonic() < deadline:
+        if not windows_processes_in_directory(install_dir):
+            return []
+        time.sleep(0.2)
+
+    kernel32.OpenProcess.argtypes = (wintypes.DWORD, wintypes.BOOL, wintypes.DWORD)
+    kernel32.OpenProcess.restype = wintypes.HANDLE
+    kernel32.TerminateProcess.argtypes = (wintypes.HANDLE, wintypes.UINT)
+    kernel32.WaitForSingleObject.argtypes = (wintypes.HANDLE, wintypes.DWORD)
+    kernel32.CloseHandle.argtypes = (wintypes.HANDLE,)
+    failed: list[Path] = []
+    for pid, path in windows_processes_in_directory(install_dir):
+        handle = kernel32.OpenProcess(0x0001 | 0x00100000, False, pid)
+        if not handle:
+            failed.append(path)
+            continue
+        try:
+            if not kernel32.TerminateProcess(handle, 0):
+                failed.append(path)
+                continue
+            kernel32.WaitForSingleObject(handle, 3000)
+        finally:
+            kernel32.CloseHandle(handle)
+    return failed
+
+
+def remove_directory_with_retry(directory: Path, attempts: int = 10) -> None:
+    last_error: Exception | None = None
+    for attempt in range(attempts):
+        try:
+            if directory.exists():
+                shutil.rmtree(directory)
+            return
+        except OSError as exc:
+            last_error = exc
+            if attempt + 1 < attempts:
+                time.sleep(0.4 * (attempt + 1))
+    raise PermissionError(
+        "旧版程序文件仍被占用，无法完成更新。请重启电脑后不要打开旧版软件，直接运行安装包；"
+        "若仍失败，请将安装目录加入安全软件信任区。"
+    ) from last_error
+
+
+def copy_path_with_retry(source: Path, destination: Path, attempts: int = 8) -> None:
+    last_error: Exception | None = None
+    for attempt in range(attempts):
+        try:
+            if source.is_dir():
+                if destination.exists():
+                    shutil.rmtree(destination)
+                shutil.copytree(source, destination)
+            else:
+                shutil.copy2(source, destination)
+            return
+        except OSError as exc:
+            last_error = exc
+            if attempt + 1 < attempts:
+                time.sleep(0.4 * (attempt + 1))
+    raise PermissionError(
+        f"无法写入 {destination.name}，文件被其他程序或安全软件占用。"
+        "请重启电脑后直接安装，或将安装目录加入安全软件信任区。"
+    ) from last_error
+
+
+def source_installer_argument() -> Path | None:
+    try:
+        index = sys.argv.index("--source-installer")
+        value = sys.argv[index + 1]
+    except (ValueError, IndexError):
+        return None
+    path = Path(value).expanduser()
+    return path if path.suffix.casefold() == ".exe" else None
+
+
+def schedule_installer_self_delete(path: Path | None) -> None:
+    if sys.platform != "win32" or path is None or not path.is_file():
+        return
+    system_root = Path(os.environ.get("SystemRoot") or r"C:\Windows")
+    powershell = system_root / "System32" / "WindowsPowerShell" / "v1.0" / "powershell.exe"
+    if not powershell.is_file():
+        return
+    escaped = str(path.resolve()).replace("'", "''")
+    script = (
+        f"$p='{escaped}'; "
+        "for($i=0;$i -lt 120;$i++){"
+        "try{Remove-Item -LiteralPath $p -Force -ErrorAction Stop;break}"
+        "catch{Start-Sleep -Milliseconds 500}}"
+    )
+    encoded = b64encode(script.encode("utf-16-le")).decode("ascii")
+    try:
+        subprocess.Popen(
+            [
+                str(powershell),
+                "-NoLogo",
+                "-NoProfile",
+                "-NonInteractive",
+                "-WindowStyle",
+                "Hidden",
+                "-EncodedCommand",
+                encoded,
+            ],
+            close_fds=True,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            creationflags=subprocess.CREATE_NO_WINDOW,
+        )
+    except OSError:
+        pass
+
+
 def validate_installed_runtime(install_dir: Path) -> None:
     app_exe = install_dir / APP_EXE_NAME
-    python_dll = install_dir / "_internal" / "python312.dll"
+    # 安装器与主程序由 build_release.py 使用同一个 Python 构建。
+    python_dll = install_dir / "_internal" / f"python{sys.version_info.major}{sys.version_info.minor}.dll"
     if not app_exe.exists() or app_exe.stat().st_size < 1024 * 1024:
         raise RuntimeError("主程序文件安装失败，可能被安全软件拦截。请检查 Windows 安全中心的保护历史记录后重新安装。")
-    if not python_dll.exists() or python_dll.stat().st_size < 1024 * 1024:
-        raise RuntimeError("运行库文件安装失败，可能被安全软件拦截或安装目录残缺。请重新安装，仍然失败请换一个安装目录。")
+    if not python_dll.is_file():
+        raise RuntimeError(f"安装目录缺少运行库 {python_dll.name}，请重新获取完整安装包后安装。")
+    if python_dll.stat().st_size < 1024 * 1024:
+        raise RuntimeError(f"运行库 {python_dll.name} 文件不完整，请重新安装。")
 
 
 def hidden_subprocess_kwargs() -> dict:
@@ -208,6 +432,7 @@ class Installer(tk.Tk):
         self.path_var = tk.StringVar(value=str(default_install_dir()))
         self.status_var = tk.StringVar(value="需要打赏获得密钥，请联系作者闲鱼用户名：满天星的")
         self.installing = False
+        self.install_succeeded = False
         self.build()
 
     def build(self) -> None:
@@ -286,6 +511,15 @@ class Installer(tk.Tk):
             self.reset_after_failure()
             return
         try:
+            self.set_progress(34, "正在检查旧版本...")
+            if is_existing_install_dir(target):
+                failed_processes = close_running_install_processes(target)
+                if failed_processes:
+                    raise PermissionError(
+                        "旧版软件未能完全退出，请在任务管理器中结束夏令营日程助手后重试。"
+                    )
+                self.set_progress(40, "正在清理旧版本...")
+                remove_directory_with_retry(target)
             self.set_progress(45, "正在安装，请稍候...")
             target.mkdir(parents=True, exist_ok=True)
             clean_install_dir_private_files(target)
@@ -294,17 +528,12 @@ class Installer(tk.Tk):
             total = max(1, len(items))
             for index, item in enumerate(items, start=1):
                 dest = target / item.name
-                if item.is_dir():
-                    if dest.exists():
-                        shutil.rmtree(dest)
-                    shutil.copytree(item, dest)
-                else:
-                    shutil.copy2(item, dest)
+                copy_path_with_retry(item, dest)
                 self.set_progress(45 + int(index / total * 25), "正在安装，请稍候...")
 
             uninstaller = package_root / "uninstall_app.exe"
             if uninstaller.exists():
-                shutil.copy2(uninstaller, target / UNINSTALL_EXE_NAME)
+                copy_path_with_retry(uninstaller, target / UNINSTALL_EXE_NAME)
 
             source_exe = target / SOURCE_EXE_NAME
             app_exe = target / APP_EXE_NAME
@@ -330,6 +559,7 @@ class Installer(tk.Tk):
             desktop = Path.home() / "Desktop" / "夏令营日程助手.lnk"
             create_shortcut(exe, desktop)
             register_uninstaller(target)
+            self.install_succeeded = True
             self.set_progress(100, "安装完成，即将关闭...")
         except Exception as exc:
             messagebox.showerror("安装失败", str(exc), parent=self)
@@ -340,4 +570,8 @@ class Installer(tk.Tk):
 
 if __name__ == "__main__":
     if acquire_single_instance("Local\\SummerCampPlanner-Installer"):
-        Installer().mainloop()
+        source_installer = source_installer_argument()
+        installer = Installer()
+        installer.mainloop()
+        if installer.install_succeeded:
+            schedule_installer_self_delete(source_installer)

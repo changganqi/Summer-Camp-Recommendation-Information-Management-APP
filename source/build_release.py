@@ -49,6 +49,13 @@ FORBIDDEN_RELEASE_SUFFIXES = {
 WINDOWS_RUNTIME_DLL_PATTERNS = (
     "libssl*.dll",
     "libcrypto*.dll",
+    "libwebp*.dll",
+    "libsharpyuv*.dll",
+    "avif.dll",
+    "tcl*t.dll",
+    "tk*t.dll",
+    "ffi.dll",
+    "libmpdec*.dll",
     "vcruntime140*.dll",
     "msvcp140*.dll",
 )
@@ -83,10 +90,11 @@ def read_string_constant(source: Path, name: str) -> str:
 def find_inno_setup_compiler() -> Path:
     configured = os.environ.get("INNO_SETUP_COMPILER", "").strip()
     local_app_data = os.environ.get("LOCALAPPDATA", "").strip()
+    user_local_app_data = Path(local_app_data) if local_app_data else Path.home() / "AppData" / "Local"
     candidates = [
         Path(configured) if configured else None,
         Path(shutil.which("ISCC.exe")) if shutil.which("ISCC.exe") else None,
-        Path(local_app_data) / "Programs" / "Inno Setup 6" / "ISCC.exe" if local_app_data else None,
+        user_local_app_data / "Programs" / "Inno Setup 6" / "ISCC.exe",
         Path(os.environ.get("ProgramFiles(x86)", "C:/Program Files (x86)")) / "Inno Setup 6" / "ISCC.exe",
         Path(os.environ.get("ProgramFiles", "C:/Program Files")) / "Inno Setup 6" / "ISCC.exe",
     ]
@@ -142,7 +150,7 @@ Source: "{APP_BUNDLE}\\*"; DestDir: "{{tmp}}\\app_bundle"; Flags: ignoreversion 
 Source: "{uninstaller}"; DestDir: "{{tmp}}"; Flags: ignoreversion deleteafterinstall
 
 [Run]
-Filename: "{{tmp}}\\installer_runtime\\{INSTALLER_RUNTIME_NAME}.exe"; WorkingDir: "{{tmp}}\\installer_runtime"; Flags: waituntilterminated
+Filename: "{{tmp}}\\installer_runtime\\{INSTALLER_RUNTIME_NAME}.exe"; Parameters: "--source-installer ""{{srcexe}}""\"; WorkingDir: "{{tmp}}\\installer_runtime"; Flags: waituntilterminated
 
 [Code]
 procedure InitializeWizard;
@@ -246,12 +254,12 @@ def collect_windows_runtime_binaries() -> list[Path]:
             for dll in directory.glob(pattern):
                 found.setdefault(dll.name.lower(), dll)
 
-    required_prefixes = ("libssl", "libcrypto")
+    required_prefixes = ("libssl", "libcrypto", "tcl", "tk")
     missing = [prefix for prefix in required_prefixes if not any(name.startswith(prefix) for name in found)]
     if missing:
         searched = "\n".join(str(path) for path in windows_runtime_search_dirs()[:40])
         raise RuntimeError(
-            "没有找到 Python SSL 运行所需 DLL："
+            "没有找到 Python SSL/Tk 运行所需 DLL："
             + ", ".join(missing)
             + "\n请确认当前 Python/Conda 环境可正常 import ssl。\n已搜索：\n"
             + searched
@@ -280,6 +288,30 @@ def assert_windows_ssl_runtime(path: Path) -> None:
         missing.append("libcrypto*.dll")
     if missing:
         raise RuntimeError("发布包缺少 SSL 运行库：" + ", ".join(missing))
+
+
+def assert_windows_tk_runtime(path: Path) -> None:
+    if sys.platform != "win32":
+        return
+    if not path.exists():
+        raise RuntimeError(f"应用目录不存在：{path}")
+    names = {item.name.lower() for item in path.rglob("*") if item.is_file()}
+    missing = [prefix + "*t.dll" for prefix in ("tcl", "tk")
+               if not any(name.startswith(prefix) and name.endswith("t.dll") for name in names)]
+    if missing:
+        raise RuntimeError(f"{path.name} 缺少 Tk 运行库：" + ", ".join(missing))
+
+
+def assert_windows_image_runtime(path: Path, binaries: list[Path]) -> None:
+    if sys.platform != "win32":
+        return
+    bundled = {item.name.lower() for item in path.rglob("*") if item.is_file()}
+    expected = {binary.name.lower() for binary in binaries
+                if binary.name.lower().startswith(("libwebp", "libsharpyuv"))
+                or binary.name.lower() == "avif.dll"}
+    missing = expected - bundled
+    if missing:
+        raise RuntimeError("发布包缺少 Pillow 图片运行库：" + ", ".join(sorted(missing)))
 
 
 def playwright_package_dir() -> Path:
@@ -341,6 +373,8 @@ def build() -> None:
     runtime_binaries = collect_windows_runtime_binaries()
     playwright_browsers = ensure_playwright_chromium()
     extra_datas: list[tuple[Path, str]] = [(ROOT / "assets", "assets")]
+    if (ROOT / "music1.mp3").is_file():
+        extra_datas.append((ROOT / "music1.mp3", "."))
     if playwright_browsers is not None:
         extra_datas.append((playwright_browsers, "playwright/driver/package/.local-browsers"))
     if runtime_binaries:
@@ -360,6 +394,8 @@ def build() -> None:
             "SummerCampPlanner",
             "--icon",
             str(ICON),
+            "--hidden-import",
+            "miniaudio",
             *add_data_args(extra_datas),
             *add_binary_args(runtime_binaries),
             "summer_camp_planner.py",
@@ -370,6 +406,8 @@ def build() -> None:
     remove_private_files(APP_BUNDLE)
     assert_clean_release_tree(APP_BUNDLE)
     assert_windows_ssl_runtime(APP_BUNDLE)
+    assert_windows_tk_runtime(APP_BUNDLE)
+    assert_windows_image_runtime(APP_BUNDLE, runtime_binaries)
     assert_playwright_chromium_runtime(APP_BUNDLE)
     run(
         [
@@ -385,6 +423,7 @@ def build() -> None:
             str(ICON),
             "--add-data",
             f"{ROOT / 'assets'};assets",
+            *add_binary_args(runtime_binaries),
             "uninstall_app.py",
         ]
     )
@@ -402,6 +441,7 @@ def build() -> None:
             str(ICON),
             "--add-data",
             f"{ROOT / 'assets'};assets",
+            *add_binary_args(runtime_binaries),
             "installer_app.py",
         ]
     )
@@ -409,6 +449,7 @@ def build() -> None:
     installer_exe = installer_runtime / f"{INSTALLER_RUNTIME_NAME}.exe"
     if not installer_exe.is_file():
         raise RuntimeError("安装界面运行文件生成失败：" + str(installer_exe))
+    assert_windows_tk_runtime(installer_runtime)
     setup_exe = build_inno_installer(installer_runtime, DIST / "uninstall_app.exe")
     shutil.copy2(setup_exe, DIST / INSTALLER_OUTPUT_NAME)
     tutorial = ROOT / "助手教程.pdf"

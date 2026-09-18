@@ -50,6 +50,10 @@ from profile_workspace import (
     save_profile_data,
     statement_char_count,
 )
+from recommendation_view import RecommendationManagementView
+from recommendation_service import RecommendationService, validate_payload as validate_recommendation_payload
+from camp_status import is_waitlisted, normalize_waitlist_fields, camp_status_display
+
 
 try:
     from PIL import Image, ImageEnhance, ImageOps, ImageTk
@@ -893,13 +897,14 @@ EDITABLE_FIELDS = [
     "camp_address",
     "advisor",
     "status",
+    "waitlist_rank",
     "priority",
     "project_type",
     "notes",
 ]
 
 DATE_FIELDS = ["signup_start", "signup_end", "result_date", "camp_start", "camp_end"]
-STATUS_OPTIONS = ["待确认", "已报名", "已入营", "已中选", "放弃/落选"]
+STATUS_OPTIONS = ["待确认", "已报名", "已入营", "候补", "已中选", "放弃/落选"]
 STATUS_ALIASES = {
     "待确认": "待确认",
     "待报名": "待确认",
@@ -908,6 +913,7 @@ STATUS_ALIASES = {
     "入营待公布": "已报名",
     "待公布": "已报名",
     "已入营": "已入营",
+    "候补": "候补",
     "已结束": "已入营",
     "已中选": "已中选",
     "中选": "已中选",
@@ -919,7 +925,7 @@ STATUS_ALIASES = {
     "放弃": "放弃/落选",
     "放弃/落选": "放弃/落选",
 }
-STATUS_SORT_RANK = {"待确认": 0, "已报名": 0, "已入营": 0, "已中选": 1, "放弃/落选": 2}
+STATUS_SORT_RANK = {"待确认": 0, "已报名": 0, "已入营": 0, "候补": 0, "已中选": 1, "放弃/落选": 2}
 PRIORITY_OPTIONS = ["普通", "关注"]
 PROJECT_TYPE_OPTIONS = ["硕士", "直博"]
 FORMAT_OPTIONS = ["待定", "线上", "线下", "线上或线下"]
@@ -940,6 +946,7 @@ FIELD_LABELS = {
     "camp_address": "参营地址",
     "advisor": "意向导师",
     "status": "状态",
+    "waitlist_rank": "候补排名",
     "priority": "优先级",
     "project_type": "类型（硕士/直博）",
     "notes": "备注",
@@ -2060,6 +2067,8 @@ def read_simple_xlsx(source: str) -> list[list[str]]:
 
 def normalize_status(value: str | None) -> str:
     text = safe_text(value).strip()
+    if is_waitlisted(text):
+        return "候补"
     return STATUS_ALIASES.get(text, "待确认")
 
 
@@ -2196,6 +2205,8 @@ class CampDatabase:
             self.conn.execute("ALTER TABLE camps ADD COLUMN advisor TEXT NOT NULL DEFAULT ''")
         if "project_type" not in existing:
             self.conn.execute("ALTER TABLE camps ADD COLUMN project_type TEXT NOT NULL DEFAULT '硕士'")
+        if "waitlist_rank" not in existing:
+            self.conn.execute("ALTER TABLE camps ADD COLUMN waitlist_rank TEXT NOT NULL DEFAULT ''")
 
     def all_camps(self) -> list[dict]:
         rows = self.conn.execute(
@@ -2211,6 +2222,7 @@ class CampDatabase:
         ).fetchall()
         camps = [dict(row) for row in rows]
         for camp in camps:
+            normalize_waitlist_fields(camp)
             camp["status"] = normalize_status(camp.get("status"))
             camp["priority"] = normalize_priority(camp.get("priority"))
             camp["project_type"] = normalize_project_type(camp.get("project_type"))
@@ -2221,6 +2233,7 @@ class CampDatabase:
         if not row:
             return None
         camp = dict(row)
+        normalize_waitlist_fields(camp)
         camp["status"] = normalize_status(camp.get("status"))
         camp["priority"] = normalize_priority(camp.get("priority"))
         camp["project_type"] = normalize_project_type(camp.get("project_type"))
@@ -2228,6 +2241,7 @@ class CampDatabase:
 
     def save(self, data: dict) -> int:
         payload = {field: safe_text(data.get(field)).strip() for field in EDITABLE_FIELDS}
+        normalize_waitlist_fields(payload)
         payload["status"] = normalize_status(payload.get("status"))
         payload["priority"] = normalize_priority(payload.get("priority"))
         payload["project_type"] = normalize_project_type(payload.get("project_type"))
@@ -2285,6 +2299,7 @@ class CampDatabase:
             self.conn.execute("DELETE FROM camps")
             for row in rows:
                 payload = {field: safe_text(row.get(field)).strip() for field in EDITABLE_FIELDS}
+                normalize_waitlist_fields(payload)
                 payload["status"] = normalize_status(payload.get("status"))
                 payload["priority"] = normalize_priority(payload.get("priority"))
                 payload["project_type"] = normalize_project_type(payload.get("project_type"))
@@ -2953,7 +2968,7 @@ def build_ai_prompt(text: str, source_url: str = "") -> str:
 13. notes 禁止写这些内容：申请条件长段落、申请材料清单、已填写进主字段的报名/公布/参营时间和地点、普通联系方式、普通截止日期、普通活动流程。用户需要细节会自己看原文。
 14. notes 只保留这些情况：时间含糊或冲突、还需在另一个系统/问卷/邮箱同步填写或确认、硕士字段借用了直博/通用信息、必须提前联系导师且会影响报名、其他非常特殊的风险。
 15. notes 中需要醒目标记的事项单独成行并以“【重点】”开头；普通提醒不用标重点。不要输出半截句子，不要复制长原文。
-16. status 只能填写：待确认、已报名、已入营、已中选、放弃/落选；新识别出的项目通常填“待确认”。如果原文明确拟录取、录取、优秀营员、中选或已获得后续资格，可填“已中选”。
+16. status 只能填写：待确认、已报名、已入营、候补、已中选、放弃/落选；新识别出的项目通常填“待确认”。如果原文明确拟录取、录取、优秀营员、中选或已获得后续资格，可填“已中选”。明确候补时填写“候补”，waitlist_rank 填已知的正整数排名，排名未知时留空。
 17. priority 只能填写：普通、关注；除非用户特别标记或文本明显非常重要，否则填“普通”。
 18. project_type 只能填写：硕士、直博。
 19. camp_format 必须且只能填写以下四个值之一：线上、线下、待定、线上或线下。
@@ -2984,6 +2999,7 @@ JSON 字段：
   "camp_address": "",
   "advisor": "",
   "status": "待确认",
+  "waitlist_rank": "",
   "priority": "普通",
   "project_type": "硕士",
   "notes": ""
@@ -3255,6 +3271,7 @@ def normalize_chat_url(api_url: str) -> str:
 
 def sanitize_ai_data(raw: dict, source_url: str = "", original_text: str = "") -> dict:
     data = {field: safe_text(raw.get(field)).strip() for field in EDITABLE_FIELDS}
+    normalize_waitlist_fields(data)
     data["status"] = normalize_status(data["status"])
     data["priority"] = normalize_priority(data["priority"])
     data["project_type"] = normalize_project_type(data.get("project_type"))
@@ -3943,6 +3960,7 @@ class SummerCampPlanner(tk.Tk):
         self.geometry("1360x860")
         self.minsize(1120, 720)
         self.db = CampDatabase(DB_PATH)
+        self.recommendation_service = RecommendationService(self.db.conn)
         self.settings = load_settings()
         self.settings["custom_theme"] = materialize_custom_theme_images(self.settings.get("custom_theme"))
         self.settings["theme"] = activate_theme_palette(self.settings.get("theme"))
@@ -3992,6 +4010,10 @@ class SummerCampPlanner(tk.Tk):
         self.notes_editor_tab: ttk.Frame | None = None
         self.profile_tab: ttk.Frame | None = None
         self.mentor_tab: ttk.Frame | None = None
+        self.recommendation_tab: ttk.Frame | None = None
+        self.recommendation_left_pane: ttk.Frame | None = None
+        self.recommendation_view = None
+        self._recommendation_opened_once = False
         self.profile_tab_strip: tk.Frame | None = None
         self.profile_sections: dict[str, ttk.Frame] = {}
         self.profile_pill_buttons: dict[str, ProfilePillButton] = {}
@@ -4086,6 +4108,7 @@ class SummerCampPlanner(tk.Tk):
         self._last_left_paned_height = 0
         self._calendar_resize_job: str | None = None
         self._calendar_render_size = (0, 0)
+        self._tray_icon = None
         self._build_style()
         self._build_ui()
         self.refresh_all()
@@ -4431,6 +4454,7 @@ class SummerCampPlanner(tk.Tk):
 
         self._build_calendar(calendar_pane)
         self._build_tree(tree_pane)
+        self.recommendation_left_pane = ttk.Frame(left, style="Panel.TFrame")
         self._build_right_panel(right)
 
     def custom_theme_items(self, *, active_only: bool = False) -> list[dict]:
@@ -4956,6 +4980,7 @@ class SummerCampPlanner(tk.Tk):
             font=("Microsoft YaHei UI", 11, "bold"),
         ).pack(fill="x", pady=(0, 4))
         action_button("AI 设置", self.open_settings, accent=True)
+        action_button("推免规则与时间设置...", self.open_recommendation_settings)
 
         section_label("主题")
         theme_grid = tk.Frame(panel, bg=GLASS_SURFACE, bd=0)
@@ -5204,6 +5229,7 @@ class SummerCampPlanner(tk.Tk):
             project_tree.tag_configure("result", background="#f4f0ff", foreground="#6941c6")
             project_tree.tag_configure("camp", background="#eaf8f2", foreground="#087a55")
             project_tree.tag_configure("status_pending", background="#fef9c3", foreground="#854d0e")
+            project_tree.tag_configure("waitlist", background="#ede9fe", foreground="#6d28d9")
             project_tree.tag_configure("status_inactive", background=GLASS_SURFACE_ALT, foreground=TEXT_SECONDARY)
 
         if self.school_tree is not None:
@@ -5211,6 +5237,7 @@ class SummerCampPlanner(tk.Tk):
             self.school_tree.tag_configure("pending", background="#fff3c4", foreground="#835d0b")
             self.school_tree.tag_configure("followup", background="#ffe4e0", foreground="#b42318")
             self.school_tree.tag_configure("selected_success", background="#dcf7eb", foreground="#087a55")
+            self.school_tree.tag_configure("waitlist", background="#ede9fe", foreground="#6d28d9")
             self.school_tree.tag_configure("inactive", background=GLASS_SURFACE_ALT, foreground=TEXT_SECONDARY)
 
     def _build_tree(self, parent: ttk.Frame) -> None:
@@ -5272,6 +5299,7 @@ class SummerCampPlanner(tk.Tk):
         self._build_ai_panel(ai_outer)
         self._build_notes_editor(notes_outer)
         self._build_profile_panel(profile_outer)
+        self.notebook.bind("<<NotebookTabChanged>>", self._on_notebook_tab_changed, add="+")
 
     def _build_notes_editor(self, parent: ttk.Frame) -> None:
         body = ttk.Frame(parent, padding=16, style="Panel.TFrame")
@@ -5321,10 +5349,12 @@ class SummerCampPlanner(tk.Tk):
         basics_tab = ttk.Frame(section_host, style="Panel.TFrame")
         self.mentor_tab = ttk.Frame(section_host, style="Panel.TFrame")
         statement_tab = ttk.Frame(section_host, style="Panel.TFrame")
+        self.recommendation_tab = ttk.Frame(section_host, style="Panel.TFrame")
         self.profile_sections = {
             "basics": basics_tab,
             "mentors": self.mentor_tab,
             "assistant": statement_tab,
+            "recommendation": self.recommendation_tab,
         }
         for section in self.profile_sections.values():
             section.grid(row=0, column=0, sticky="nsew")
@@ -5332,6 +5362,7 @@ class SummerCampPlanner(tk.Tk):
             ("basics", "基础资料", "#dbeafe", "#1d4ed8"),
             ("mentors", "导师管理", "#dcfce7", "#087a55"),
             ("assistant", "智能助手", "#f3e8ff", "#7e22ce"),
+            ("recommendation", "推免管理", "#ffedd5", "#c2410c"),
         )
         for key, label, fill, foreground in pill_specs:
             button = ProfilePillButton(
@@ -5340,12 +5371,14 @@ class SummerCampPlanner(tk.Tk):
                 lambda selected=key: self.show_profile_section(selected),
                 fill,
                 foreground,
+                width=104,
             )
-            button.pack(side="left", padx=(0, 7))
+            button.pack(side="left", padx=(0, 6))
             self.profile_pill_buttons[key] = button
         self._build_profile_basics_tab(basics_tab)
         self._build_mentor_management_tab(self.mentor_tab)
         self._build_statement_tab(statement_tab)
+        self._build_recommendation_management_tab(self.recommendation_tab)
         self.show_profile_section("basics")
 
     def show_profile_section(self, section_key: str) -> None:
@@ -5355,6 +5388,51 @@ class SummerCampPlanner(tk.Tk):
         section.tkraise()
         for key, button in self.profile_pill_buttons.items():
             button.set_selected(key == section_key)
+
+        # 核心联动：若为推免管理，左侧切换为推免决战大看板；其他胶囊则切换回日历与项目列表
+        if section_key == "recommendation":
+            if self.recommendation_view:
+                self.recommendation_view.reload_data()
+            if self.left_paned is not None and self.left_paned.winfo_ismapped():
+                self.left_paned.pack_forget()
+            if self.recommendation_left_pane is not None and not self.recommendation_left_pane.winfo_ismapped():
+                self.recommendation_left_pane.pack(fill="both", expand=True)
+            if not self._recommendation_opened_once:
+                self._recommendation_opened_once = True
+                if self.recommendation_view and not self.recommendation_view.settings["is_initialized"]:
+                    self.after(150, self.recommendation_view.open_initial_settings_dialog)
+        else:
+            if self.recommendation_left_pane is not None and self.recommendation_left_pane.winfo_ismapped():
+                self.recommendation_left_pane.pack_forget()
+            if self.left_paned is not None and not self.left_paned.winfo_ismapped():
+                self.left_paned.pack(fill="both", expand=True)
+
+    def _on_notebook_tab_changed(self, _event=None) -> None:
+        try:
+            if not hasattr(self, "notebook") or self.notebook is None:
+                return
+            selected_tab = self.notebook.select()
+            if self.profile_tab is not None and selected_tab != str(self.profile_tab):
+                # 切换离开信息助手大Tab，确保左侧恢复为日历与项目列表
+                if self.recommendation_left_pane is not None and self.recommendation_left_pane.winfo_ismapped():
+                    self.recommendation_left_pane.pack_forget()
+                if self.left_paned is not None and not self.left_paned.winfo_ismapped():
+                    self.left_paned.pack(fill="both", expand=True)
+            else:
+                # 切回信息助手，检查推免管理是否处于激活状态
+                rec_btn = self.profile_pill_buttons.get("recommendation")
+                if rec_btn and getattr(rec_btn, "_selected", False):
+                    if self.left_paned is not None and self.left_paned.winfo_ismapped():
+                        self.left_paned.pack_forget()
+                    if self.recommendation_left_pane is not None and not self.recommendation_left_pane.winfo_ismapped():
+                        self.recommendation_left_pane.pack(fill="both", expand=True)
+        except Exception:
+            pass
+
+    def _build_recommendation_management_tab(self, parent: ttk.Frame) -> None:
+        left_pane = getattr(self, "recommendation_left_pane", parent)
+        self.recommendation_view = RecommendationManagementView(left_pane, parent, self)
+
 
     def _build_profile_basics_tab(self, parent: ttk.Frame) -> None:
         body = ttk.Frame(parent, padding=12, style="Panel.TFrame")
@@ -5941,7 +6019,7 @@ class SummerCampPlanner(tk.Tk):
         }
         widths = {
             "school": 260,
-            "status": 72,
+            "status": 108,
             "priority": 62,
             "signup": 94,
             "result": 70,
@@ -6012,6 +6090,16 @@ class SummerCampPlanner(tk.Tk):
         status_combo = ttk.Combobox(body, textvariable=self.vars["status"], values=STATUS_OPTIONS)
         status_combo.grid(row=row, column=1, sticky="ew", pady=4)
         self.form_comboboxes.append(status_combo)
+        row += 1
+        self.vars["waitlist_rank"] = tk.StringVar()
+        self.waitlist_rank_label = ttk.Label(body, text="候补排名", style="Panel.TLabel")
+        self.waitlist_rank_label.grid(row=row, column=0, sticky="w", pady=4)
+        self.waitlist_rank_entry = ttk.Entry(body, textvariable=self.vars["waitlist_rank"])
+        self.waitlist_rank_entry.grid(row=row, column=1, sticky="ew", pady=4)
+        self.waitlist_rank_hint = ttk.Label(body, text="名（未知可留空）", style="Panel.TLabel")
+        self.waitlist_rank_hint.grid(row=row, column=2, sticky="w", padx=6)
+        self.vars["status"].trace_add("write", self.update_waitlist_rank_field)
+        self.update_waitlist_rank_field()
         row += 1
         ttk.Label(body, text="优先级", style="Panel.TLabel").grid(row=row, column=0, sticky="w", pady=4)
         priority_combo = ttk.Combobox(
@@ -6131,6 +6219,13 @@ class SummerCampPlanner(tk.Tk):
         self.bind_mousewheel(canvas, canvas)
         self.bind_mousewheel_recursive(body, canvas)
         self.bind_mousewheel(self.notes_text, add=False)
+
+    def update_waitlist_rank_field(self, *_args) -> None:
+        for widget in (self.waitlist_rank_label, self.waitlist_rank_entry, self.waitlist_rank_hint):
+            if is_waitlisted(self.vars["status"].get()):
+                widget.grid()
+            else:
+                widget.grid_remove()
 
     def _build_ai_panel(self, parent: ttk.Frame) -> None:
         body = ttk.Frame(parent, padding=16, style="Panel.TFrame")
@@ -7217,6 +7312,8 @@ class SummerCampPlanner(tk.Tk):
             status = normalize_status(camp.get("status"))
             if status == "放弃/落选":
                 tags = ("status_inactive",)
+            elif status == "候补":
+                tags = ("waitlist",)
             elif kind == "pending_signup":
                 tags = ("pending_signup",)
             else:
@@ -7227,7 +7324,7 @@ class SummerCampPlanner(tk.Tk):
                 camp.get("registration_number"),
                 date_text,
                 safe_text(camp.get("camp_format")) or "待定",
-                status,
+                camp_status_display(camp),
                 self.days_hint(hint_day, hint_label, date.today()),
             )
             self.tree.insert("", "end", iid=f"{camp['id']}:{kind}:{index}", values=values, tags=tags)
@@ -7272,7 +7369,7 @@ class SummerCampPlanner(tk.Tk):
         self.refresh_school_list()
 
     def cycle_school_status_filter(self) -> None:
-        options = ["", "待确认", "已报名", "已入营", "已中选", "放弃/落选"]
+        options = ["", *STATUS_OPTIONS]
         index = options.index(self.school_filter_status) if self.school_filter_status in options else 0
         self.school_filter_status = options[(index + 1) % len(options)]
         self.refresh_school_list()
@@ -7310,7 +7407,9 @@ class SummerCampPlanner(tk.Tk):
                 status = normalize_status(camp.get("status"))
                 followup_hint = self.school_followup_hint(camp)
                 tags = []
-                if followup_hint:
+                if status == "候补":
+                    tags.append("waitlist")
+                elif followup_hint:
                     tags.append("followup")
                 elif status == "已中选":
                     tags.append("selected_success")
@@ -7326,7 +7425,7 @@ class SummerCampPlanner(tk.Tk):
                     iid=str(camp["id"]),
                     values=(
                         self.camp_display_name(camp),
-                        status,
+                        camp_status_display(camp),
                         normalize_priority(camp.get("priority")),
                         format_range(camp.get("signup_start"), camp.get("signup_end")),
                         format_date_cn(camp.get("result_date")),
@@ -7382,6 +7481,8 @@ class SummerCampPlanner(tk.Tk):
             return (99, camp_anchor or result_day or signup_end or date.max, name)
         if status == "已中选":
             return (90, camp_anchor or result_day or signup_end or date.max, name)
+        if status == "候补":
+            return (9, camp_anchor or result_day or signup_end or date.max, name)
 
         if status == "待确认" and signup_end and signup_end >= today:
             return (0, signup_end, name)
@@ -7525,6 +7626,11 @@ class SummerCampPlanner(tk.Tk):
         if not data["school"]:
             messagebox.showwarning("缺少学校名", "请至少填写学校名。", parent=self)
             return None
+        try:
+            normalize_waitlist_fields(data)
+        except ValueError as exc:
+            messagebox.showerror("候补排名格式错误", str(exc), parent=self)
+            return None
         data["status"] = normalize_status(data.get("status"))
         data["priority"] = normalize_priority(data.get("priority"))
         data["project_type"] = normalize_project_type(data.get("project_type"))
@@ -7580,6 +7686,8 @@ class SummerCampPlanner(tk.Tk):
             self.draw_calendar()
             self.refresh_tree()
             self.refresh_school_list()
+            if self.recommendation_view:
+                self.recommendation_view.reload_data()
             self.update_status("已保存")
         except Exception as exc:
             messagebox.showerror("保存失败", str(exc), parent=self)
@@ -9900,6 +10008,8 @@ class SummerCampPlanner(tk.Tk):
         self.update_status(f"已导出日程：{target}")
 
     def export_full_backup(self) -> None:
+        if self.recommendation_view and not self.recommendation_view._persist_note_draft():
+            return
         target = filedialog.asksaveasfilename(
             parent=self,
             title="导出备份",
@@ -9919,7 +10029,7 @@ class SummerCampPlanner(tk.Tk):
                     personal_profile = PERSONAL_PROFILE_PATH.read_text(encoding="utf-8")
                 profile_data = load_profile_data(PERSONAL_PROFILE_DATA_PATH)
             payload = {
-                "version": 5,
+                "version": 6,
                 "app": APP_NAME,
                 "exported_at": now_text(),
                 "camps": [
@@ -9930,6 +10040,7 @@ class SummerCampPlanner(tk.Tk):
                 "personal_profile_data": profile_data,
                 "settings": {field: self.settings.get(field, DEFAULT_SETTINGS[field]) for field in DEFAULT_SETTINGS},
                 "custom_theme_assets": export_custom_theme_assets(self.settings.get("custom_theme")),
+                "recommendation": self.recommendation_service.export_data(),
             }
             with open(target, "w", encoding="utf-8") as fh:
                 json.dump(payload, fh, ensure_ascii=False, indent=2)
@@ -9953,11 +10064,21 @@ class SummerCampPlanner(tk.Tk):
             return
         if not messagebox.askyesno(
             "确认导入备份",
-            "导入备份会覆盖当前所有项目；JSON 完整备份还会恢复个人信息、智能助手设置和主题图片。建议先导出一份当前备份。\n\n继续导入吗？",
+            "导入备份会覆盖当前所有项目；JSON 完整备份还会恢复个人信息、智能助手设置、主题图片及推免数据（若包含）。建议先导出一份当前备份。\n\n继续导入吗？",
             parent=self,
         ):
             return
+        if self.recommendation_view and not self.recommendation_view._persist_note_draft():
+            return
+        try:
+            rows, restored = self.read_backup_payload(source)
+            if not rows and not restored:
+                raise RuntimeError("备份文件里没有可导入的数据。")
+        except Exception as exc:
+            messagebox.showerror("导入备份失败", str(exc), parent=self)
+            return
         old_rows = self.db.all_camps()
+        old_recommendation = self.recommendation_service.export_data()
         old_settings = dict(self.settings)
         old_runtime_key = self.runtime_api_key
         file_snapshots: dict[Path, bytes | None] = {}
@@ -9965,9 +10086,6 @@ class SummerCampPlanner(tk.Tk):
         for profile_path in (PERSONAL_PROFILE_PATH, PERSONAL_PROFILE_DATA_PATH):
             file_snapshots[profile_path] = profile_path.read_bytes() if profile_path.exists() else None
         try:
-            rows, restored = self.read_backup_payload(source)
-            if not rows and not restored:
-                raise RuntimeError("备份文件里没有可导入的数据。")
             restored_profile_data = None
             if "personal_profile_data" in restored:
                 restored_profile_data = normalize_profile_data(restored.get("personal_profile_data"))
@@ -9982,6 +10100,11 @@ class SummerCampPlanner(tk.Tk):
                     restored.get("custom_theme_assets"),
                 )
             self.db.replace_all(rows)
+            recommendation = restored.get("recommendation", old_recommendation)
+            recommendation = self.recommendation_service.remap_camp_links(recommendation, self.db.all_camps())
+            self.recommendation_service.restore_data(recommendation)
+            if self.recommendation_view:
+                self.recommendation_view.reload_data(restore_notes=True)
             if "personal_profile" in restored:
                 PERSONAL_PROFILE_PATH.write_text(safe_text(restored.get("personal_profile")), encoding="utf-8")
             if restored_profile_data is not None:
@@ -10000,6 +10123,11 @@ class SummerCampPlanner(tk.Tk):
         except Exception as exc:
             try:
                 self.db.replace_all(old_rows)
+                self.recommendation_service.restore_data(
+                    self.recommendation_service.remap_camp_links(old_recommendation, self.db.all_camps())
+                )
+                if self.recommendation_view:
+                    self.recommendation_view.reload_data(restore_notes=True)
                 for profile_path, content in file_snapshots.items():
                     if content is None:
                         profile_path.unlink(missing_ok=True)
@@ -10041,6 +10169,8 @@ class SummerCampPlanner(tk.Tk):
                 restored["settings"] = payload["settings"]
             if isinstance(payload.get("custom_theme_assets"), list):
                 restored["custom_theme_assets"] = payload["custom_theme_assets"]
+            if "recommendation" in payload:
+                restored["recommendation"] = validate_recommendation_payload(payload["recommendation"])
             return self.clean_backup_rows(rows), restored
         return self.read_backup_rows(source), {}
 
@@ -10052,6 +10182,7 @@ class SummerCampPlanner(tk.Tk):
             mapped = {field: safe_text(row.get(field)).strip() for field in self.backup_fields()}
             if not any(mapped.get(field) for field in EDITABLE_FIELDS):
                 continue
+            normalize_waitlist_fields(mapped)
             mapped["status"] = normalize_status(mapped.get("status"))
             mapped["priority"] = normalize_priority(mapped.get("priority"))
             mapped["project_type"] = normalize_project_type(mapped.get("project_type"))
@@ -10087,6 +10218,7 @@ class SummerCampPlanner(tk.Tk):
                     mapped = {reverse_headers.get(key, key): value for key, value in row.items() if key}
                     if not any(mapped.get(field) for field in EDITABLE_FIELDS):
                         continue
+                    normalize_waitlist_fields(mapped)
                     mapped["status"] = normalize_status(mapped.get("status"))
                     mapped["priority"] = normalize_priority(mapped.get("priority"))
                     mapped["project_type"] = normalize_project_type(mapped.get("project_type"))
@@ -10102,6 +10234,7 @@ class SummerCampPlanner(tk.Tk):
         for values in rows[1:]:
             row = {field: safe_text(value).strip() for field, value in zip(mapped_fields, values) if field}
             if any(row.get(field) for field in EDITABLE_FIELDS):
+                normalize_waitlist_fields(row)
                 row["status"] = normalize_status(row.get("status"))
                 row["priority"] = normalize_priority(row.get("priority"))
                 row["project_type"] = normalize_project_type(row.get("project_type"))
@@ -10111,6 +10244,14 @@ class SummerCampPlanner(tk.Tk):
 
     def open_settings(self) -> None:
         SettingsDialog(self, self.settings, self.runtime_api_key, self.apply_settings)
+
+    def open_recommendation_settings(self) -> None:
+        if getattr(self, "recommendation_view", None) is not None:
+            self.recommendation_view.open_settings_dialog()
+        else:
+            from recommendation_view import RecommendationSettingsDialog
+            RecommendationSettingsDialog(self, self.recommendation_service.export_data()["settings"],
+                                         self.recommendation_service.save_recommendation_settings)
 
     def apply_settings(self, settings: dict, runtime_key: str) -> None:
         merged = self.settings.copy()
@@ -10292,10 +10433,88 @@ class SummerCampPlanner(tk.Tk):
         threading.Thread(target=runner, daemon=True).start()
 
     def on_close(self) -> None:
+        """右上角关闭按钮拦截：转入后台托盘运行，保持推免心跳与录取提醒持续生效"""
+        self.minimize_to_tray()
+
+    def minimize_to_tray(self) -> None:
+        """最小化隐藏到后台系统托盘"""
+        if self.recommendation_view:
+            self.recommendation_view._persist_note_draft()
+        self.withdraw()
+        self._ensure_tray_icon()
+        from recommendation_alerts import send_windows_toast
+        send_windows_toast(
+            "夏令营与推免助手已转入后台运行",
+            "推免倒计时与待录取提醒将持续生效。双击托盘图标可重新打开，右键可完全退出。"
+        )
+
+    def restore_from_tray(self) -> None:
+        """从系统托盘唤醒并前置显示主窗口"""
+        self.deiconify()
+        self.lift()
+        self.focus_force()
+
+    def open_recommendation_settings_from_tray(self) -> None:
+        """从系统托盘菜单直接打开推免设置"""
+        self.restore_from_tray()
+        self.after(100, self.open_recommendation_settings)
+
+    def _ensure_tray_icon(self) -> None:
+        """初始化并常驻系统托盘图标"""
+        if getattr(self, "_tray_icon", None) is not None:
+            return
+        try:
+            import pystray
+            from PIL import Image
+
+            icon_path = resource_path("assets", "app.ico")
+            if icon_path.exists():
+                image = Image.open(str(icon_path))
+            else:
+                image = Image.new("RGBA", (64, 64), (37, 99, 235, 255))
+
+            menu = pystray.Menu(
+                pystray.MenuItem("📌 显示主界面", lambda icon, item: self.after_idle(self.restore_from_tray), default=True),
+                pystray.MenuItem("⚙️ 推免规则与时间设置...", lambda icon, item: self.after_idle(self.open_recommendation_settings_from_tray)),
+                pystray.Menu.SEPARATOR,
+                pystray.MenuItem("❌ 完全退出软件", lambda icon, item: self.after_idle(self.real_quit)),
+            )
+
+            self._tray_icon = pystray.Icon(
+                "SummerCampPlanner",
+                image,
+                "夏令营与推免日程助手 (后台运行中)",
+                menu=menu,
+            )
+            self._tray_icon.run_detached()
+        except Exception:
+            pass
+
+    def real_quit(self) -> None:
+        """用户显式选择完全退出软件"""
         if self.profile_workspace_loaded and not self.confirm_statement_changes():
             return
+        if self.recommendation_view:
+            if not self.recommendation_view._persist_note_draft():
+                return
+            self.recommendation_view.stop_recommendation_timer()
+        if getattr(self, "_tray_icon", None) is not None:
+            try:
+                self._tray_icon.stop()
+            except Exception:
+                pass
+            self._tray_icon = None
         self.db.close()
         self.destroy()
+
+    def destroy(self) -> None:
+        if getattr(self, "_tray_icon", None) is not None:
+            try:
+                self._tray_icon.stop()
+            except Exception:
+                pass
+            self._tray_icon = None
+        super().destroy()
 
 
 def run_self_test() -> None:
@@ -10368,6 +10587,12 @@ def run_self_test() -> None:
             theme_image_path = tmp_path / "theme.png"
             Image.new("RGB", (40, 20), "#315b70").save(theme_image_path)
             assert expand_custom_theme_images([str(tmp_path), str(theme_image_path)]) == [str(theme_image_path)]
+            webp_image_path = tmp_path / "theme.webp"
+            Image.new("RGB", (40, 20), "#315b70").save(webp_image_path)
+            with Image.open(webp_image_path) as opened:
+                opened.verify()
+            with Image.open(webp_image_path) as opened:
+                opened.load()
             rendered_theme = render_theme_wallpaper(
                 load_theme_image_source(str(theme_image_path)),
                 (160, 90),

@@ -4,7 +4,7 @@ from datetime import datetime
 import tkinter as tk
 from tkinter import ttk, messagebox
 
-from recommendation_service import parse_time, offer_fields, offer_time_labels
+from recommendation_service import parse_time, offer_fields, offer_time_labels, stage_timing_fields
 
 
 class ModernDateTimeInput(ttk.Frame):
@@ -128,7 +128,7 @@ class ModernDateTimeInput(ttk.Frame):
             val = (self.variable.get() or "").strip()
             if not val:
                 if not self.optional:
-                    default_time = f"{self.year_var.get().strip() or '2026'}-09-21 00:00"
+                    default_time = self.default.strftime("%Y-%m-%d %H:%M")
                     self.display_var.set(default_time)
                 else:
                     self.display_var.set("")
@@ -654,7 +654,9 @@ class OfferTimingInput(ttk.Frame):
         ttk.Label(self, text="录取确认开始时间:").pack(anchor="w")
         self.mode_combo = ttk.Combobox(self, textvariable=self.mode_var, values=list(self.MODES.values()), state="readonly")
         self.mode_combo.pack(fill="x", pady=(2, 4))
-        self.date_input = DateTimeInput(self, self.start_var, default=self.clock())
+        # 与阶段时间设置使用同一套可见输入框，避免 ttk Spinbox 在部分
+        # Windows 主题下显示为空或无法编辑。
+        self.date_input = ModernDateTimeInput(self, self.start_var, optional=False, default=self.clock())
         self.date_input.pack(anchor="w")
         self.start_hint = ttk.Label(self, foreground="#64748b", wraplength=380)
         self.start_hint.pack(anchor="w")
@@ -701,6 +703,65 @@ class OfferTimingInput(ttk.Frame):
             self.deadline_label.configure(text=f"确认截止时间：{deadline}")
         except ValueError as exc:
             self.deadline_label.configure(text=str(exc))
+
+
+class StageWindowInput(ttk.Frame):
+    """学校级的志愿填报/复试通知时间窗口编辑器。"""
+
+    def __init__(self, parent, settings, clock=None, stage="choice"):
+        super().__init__(parent)
+        self.settings = settings
+        self.clock = clock or datetime.now
+        self.stage = stage
+        prefix = "choice" if stage == "choice" else "reexam"
+        self.start_key = f"{prefix}_start_time"
+        self.duration_key = f"{prefix}_duration_minutes"
+        self.start_var = tk.StringVar(self)
+        self.duration_var = tk.StringVar(self)
+        self.unit_var = tk.StringVar(self, value="分钟")
+        title = "志愿填报时限" if stage == "choice" else "接受复试通知时限"
+        ttk.Label(self, text=title + "（可按学校通知填写）:").pack(anchor="w")
+        row = ttk.Frame(self)
+        row.pack(fill="x", pady=(2, 2))
+        # 起始时间控件必须以 row 为父容器。旧实现先以 self 为父容器，
+        # 再通过 pack(in_=row) 重定向布局，Tk 会让它与 row 本身重叠，
+        # 结果就是变量里有时间、画面却被 row 的背景盖住。分段 Spinbox
+        # 在部分 Windows ttk 主题下也会显示为空，因此这里使用一体化
+        # 输入框并直接放入 row，确保文本实际绘制出来。
+        self.date_input = ModernDateTimeInput(row, self.start_var, optional=False, default=self.clock())
+        self.date_input.pack(side="left")
+        ttk.Label(row, text="起，允许").pack(side="left", padx=(4, 2))
+        ttk.Spinbox(row, from_=1, to=525600, textvariable=self.duration_var, width=7).pack(side="left")
+        ttk.Combobox(row, textvariable=self.unit_var, values=("分钟", "小时"), width=5, state="readonly").pack(side="left", padx=4)
+        self.hint_label = ttk.Label(self, foreground="#64748b", wraplength=380)
+        self.hint_label.pack(anchor="w")
+        for var in (self.start_var, self.duration_var, self.unit_var):
+            var.trace_add("write", self._update)
+        self._update()
+
+    def get(self):
+        raw = self.duration_var.get().strip()
+        if raw and (not raw.isascii() or not raw.isdigit() or int(raw) < 1):
+            raise ValueError("阶段允许时长请输入正整数。")
+        minutes = int(raw) * (60 if self.unit_var.get() == "小时" else 1) if raw else None
+        # ModernDateTimeInput 在空变量时仅显示默认时间，不能把这个提示值写入
+        # 数据；只有用户实际改过日期/时间后，变量才会产生值。
+        value = self.date_input.get() if self.start_var.get().strip() else ""
+        return {self.start_key: value, self.duration_key: minutes}
+
+    def set(self, item):
+        fields = stage_timing_fields(item)
+        value = fields[self.start_key]
+        self.date_input.set(value)
+        minutes = fields[self.duration_key]
+        self.unit_var.set("小时" if minutes and minutes % 60 == 0 else "分钟")
+        self.duration_var.set(str(minutes // 60 if self.unit_var.get() == "小时" else minutes) if minutes else "")
+        self._update()
+
+    def _update(self, *_args):
+        global_key = "choice_open_time" if self.stage == "choice" else "reexam_open_time"
+        hint = self.settings().get(global_key) or "请在规则设置中补充系统时间"
+        self.hint_label.configure(text=f"未填写学校专属时间时，跟随系统开放：{hint}")
 
 
 class DateTimeDialog(tk.Toplevel):

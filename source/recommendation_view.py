@@ -14,9 +14,10 @@ from recommendation_service import (
     DEFAULT_RECOMMENDATION_SETTINGS, parse_time, validate_settings,
     timeline_countdown, effective_admission_deadline,
     minute_duration_text, offer_fields, offer_window, offer_sort_key, offer_time_labels,
+    stage_timing_fields, choice_window, reexam_window,
 )
 from camp_status import camp_status_display, camp_import_sort_key
-from recommendation_widgets import DateTimeInput, ModernDateTimeInput, OfferTimingInput, DateTimeDialog
+from recommendation_widgets import ModernDateTimeInput, OfferTimingInput, StageWindowInput
 from recommendation_alerts import AdmissionAlertModal, AlertSoundPlayer, send_windows_toast
 
 
@@ -104,8 +105,8 @@ class RecommendationSettingsDialog(tk.Toplevel):
     def __init__(self, master, current_settings: dict, on_save_callback):
         super().__init__(master)
         self.title("推免服务系统规则与时间配置向导")
-        self.geometry("760x710")
-        self.minsize(720, 680)
+        self.geometry("820x850")
+        self.minsize(760, 800)
         self.transient(master)
         self.grab_set()
         self.configure(bg="#f8fafc")
@@ -115,6 +116,9 @@ class RecommendationSettingsDialog(tk.Toplevel):
         self.year_var = tk.StringVar(value=str(self.settings.get("year", "2026")))
         self.reg_time_var = tk.StringVar(value=str(self.settings.get("reg_open_time", "2026-09-18 09:00")))
         self.choice_time_var = tk.StringVar(value=str(self.settings.get("choice_open_time", "2026-09-21 00:00")))
+        self.choice_close_var = tk.StringVar(value=self.settings.get("choice_close_time", ""))
+        self.reexam_open_var = tk.StringVar(value=self.settings.get("reexam_open_time", ""))
+        self.reexam_close_var = tk.StringVar(value=self.settings.get("reexam_close_time", ""))
         self.admission_open_var = tk.StringVar(value=self.settings.get("admission_open_time", ""))
         self.admission_close_var = tk.StringVar(value=self.settings.get("admission_close_time", ""))
         self.slot_count_var = tk.IntVar(value=int(self.settings.get("slot_count", 3)))
@@ -144,7 +148,9 @@ class RecommendationSettingsDialog(tk.Toplevel):
         new_year = self.year_var.get().strip()
         if len(new_year) == 4 and new_year.isdigit():
             import re
-            for var in (self.reg_time_var, self.choice_time_var, self.admission_open_var, self.admission_close_var):
+            for var in (self.reg_time_var, self.choice_time_var, self.choice_close_var,
+                        self.reexam_open_var, self.reexam_close_var,
+                        self.admission_open_var, self.admission_close_var):
                 val = var.get().strip()
                 if val:
                     m = re.match(r"^\d{4}(.*)$", val)
@@ -225,8 +231,11 @@ class RecommendationSettingsDialog(tk.Toplevel):
         choice_entry = ModernDateTimeInput(form_frame, self.choice_time_var, year_var=self.year_var)
         choice_entry.grid(row=2, column=1, columnspan=3, sticky="w", padx=4, pady=6)
 
-        for row, label, variable in ((3, "待录取确认开放时间:", self.admission_open_var),
-                                     (4, "待录取确认结束时间:", self.admission_close_var)):
+        for row, label, variable in ((3, "志愿填报截止时间:", self.choice_close_var),
+                                     (4, "接受复试通知开放时间:", self.reexam_open_var),
+                                     (5, "接受复试通知截止时间:", self.reexam_close_var),
+                                     (6, "待录取确认开放时间:", self.admission_open_var),
+                                     (7, "待录取确认结束时间:", self.admission_close_var)):
             ttk.Label(form_frame, text=label).grid(row=row, column=0, sticky="w", pady=6)
             ModernDateTimeInput(form_frame, variable, year_var=self.year_var, optional=True).grid(row=row, column=1, columnspan=3, sticky="w", padx=4, pady=6)
         
@@ -235,11 +244,11 @@ class RecommendationSettingsDialog(tk.Toplevel):
             text="💡 支持直接键入/粘贴时间（失焦智能规整），亦可点击 📅 ▾ 快捷点选；未公布时保持“暂未公布”。",
             foreground="#64748b",
             font=("Microsoft YaHei UI", 8),
-        ).grid(row=5, column=0, columnspan=4, sticky="w", pady=(2, 6))
+        ).grid(row=8, column=0, columnspan=4, sticky="w", pady=(2, 6))
 
-        ttk.Label(form_frame, text="单志愿锁定时长(小时):").grid(row=6, column=0, sticky="w", pady=6)
+        ttk.Label(form_frame, text="单志愿锁定时长(小时):").grid(row=9, column=0, sticky="w", pady=6)
         lock_spin = ttk.Spinbox(form_frame, from_=12, to=72, increment=1, textvariable=self.lock_hours_var, width=15)
-        lock_spin.grid(row=6, column=1, sticky="w", padx=4, pady=6)
+        lock_spin.grid(row=9, column=1, sticky="w", padx=4, pady=6)
 
         hint_label = ttk.Label(
             form_frame,
@@ -247,7 +256,7 @@ class RecommendationSettingsDialog(tk.Toplevel):
             foreground="#64748b",
             font=("Microsoft YaHei UI", 8),
         )
-        hint_label.grid(row=7, column=0, columnspan=4, sticky="w", pady=(2, 6))
+        hint_label.grid(row=10, column=0, columnspan=4, sticky="w", pady=(2, 6))
 
         # 提醒配置：采用 ModernCheckbutton 清晰打勾 √
         notify_frame = ttk.LabelFrame(container, text="决战提醒与防误触警报", padding=(14, 10))
@@ -286,6 +295,9 @@ class RecommendationSettingsDialog(tk.Toplevel):
         self.year_var.set("2026")
         self.reg_time_var.set("2026-09-18 09:00")
         self.choice_time_var.set("2026-09-21 00:00")
+        self.choice_close_var.set("")
+        self.reexam_open_var.set("")
+        self.reexam_close_var.set("")
         self.admission_open_var.set("")
         self.admission_close_var.set("")
         self.slot_count_var.set(3)
@@ -308,6 +320,9 @@ class RecommendationSettingsDialog(tk.Toplevel):
             "year": self.year_var.get().strip() or "2026",
             "reg_open_time": self.reg_time_var.get().strip() or "2026-09-18 09:00",
             "choice_open_time": self.choice_time_var.get().strip() or "2026-09-21 00:00",
+            "choice_close_time": self.choice_close_var.get().strip(),
+            "reexam_open_time": self.reexam_open_var.get().strip(),
+            "reexam_close_time": self.reexam_close_var.get().strip(),
             "admission_open_time": self.admission_open_var.get().strip(),
             "admission_close_time": self.admission_close_var.get().strip(),
             "slot_count": self.slot_count_var.get(),
@@ -458,6 +473,8 @@ class RecommendationManagementView:
         self.right_note_school = None
         self.right_note_contact = None
         self.right_note_text = None
+        self.right_choice_timing = None
+        self.right_reexam_timing = None
 
         self._build_views()
         self._restore_right_notes()
@@ -614,10 +631,16 @@ class RecommendationManagementView:
             tag_text = f"🔒 {hours:g}h 锁定中"
             tag_bg = "#fef3c7"
             tag_fg = "#b45309"
+        elif status == "unlocked":
+            card_bg = "#f0fdf4"
+            border_color = "#86efac"
+            tag_text = "✓ 已解锁 · 可修改"
+            tag_bg = "#dcfce7"
+            tag_fg = "#15803d"
         elif status == "admission":
             card_bg = "#fef2f2"
             border_color = "#fca5a5"
-            tag_text = "🔥 收到待录取通知!"
+            tag_text = "🔥 待录取确认中"
             tag_bg = "#fee2e2"
             tag_fg = "#dc2626"
         elif status == "admitted":
@@ -717,21 +740,100 @@ class RecommendationManagementView:
                 anchor="w",
             ).pack(fill="x", pady=(2, 6))
 
+            if slot.get("reexam_accepted_at"):
+                action_text = "接受待录取"
+            else:
+                action_text = "接受复试通知"
+            # 蓝色主流程按钮放在卡片最醒目的位置；致电速记和拒绝保留
+            # 在底部作为辅助操作。
+            ttk.Button(
+                inner,
+                text=action_text,
+                style="Accent.TButton",
+                command=lambda idx=index: self._advance_locked_stage(idx),
+            ).pack(fill="x", pady=(4, 0))
             btn_row = tk.Frame(inner, bg=card_bg)
             btn_row.pack(fill="x", side="bottom", pady=(8, 0))
-
             ttk.Button(
                 btn_row,
                 text="致电速记",
                 command=lambda s=slot: self._sync_to_right_notes(s),
-            ).pack(side="left", padx=(0, 4))
-
+            ).pack(side="left", fill="x", expand=True)
             ttk.Button(
                 btn_row,
-                text="高校已拒绝(解封)",
-                command=lambda idx=index: self._force_unlock_slot(idx),
-            ).pack(side="right")
-            ttk.Button(inner, text="登记收到待录取", command=lambda idx=index: self._record_admission(idx)).pack(fill="x", pady=(4, 0))
+                text="拒绝",
+                command=lambda idx=index: self._reject_locked_slot(idx),
+            ).pack(side="right", padx=(8, 0))
+
+        elif status == "unlocked":
+            tk.Label(
+                inner,
+                text=f"{slot.get('school', '')} · {slot.get('college', '')}",
+                bg=card_bg,
+                fg="#166534",
+                font=("Microsoft YaHei UI", 11, "bold"),
+                anchor="w",
+            ).pack(fill="x", pady=(0, 2))
+            tk.Label(
+                inner,
+                text=f"报考专业：{slot.get('major', '')}",
+                bg=card_bg,
+                fg="#166534",
+                font=("Microsoft YaHei UI", 9),
+                anchor="w",
+            ).pack(fill="x", pady=(0, 6))
+            available_box = tk.Frame(inner, bg="#dcfce7", padx=10, pady=8, bd=1, relief="solid")
+            available_box.configure(highlightbackground="#86efac")
+            available_box.pack(fill="x", pady=(0, 6))
+            label = tk.Label(
+                available_box,
+                text="✓ 锁定时间已结束，志愿仍保留在此位置",
+                bg="#dcfce7",
+                fg="#166534",
+                font=("Microsoft YaHei UI", 10, "bold"),
+                anchor="w",
+            )
+            label.pack(fill="x")
+            self.slot_time_labels[index] = label
+            tk.Label(
+                available_box,
+                text="锁定已结束，但该志愿仍可继续接受复试通知和待录取。",
+                bg="#dcfce7",
+                fg="#166534",
+                font=("Microsoft YaHei UI", 8),
+                anchor="w",
+            ).pack(fill="x", pady=(2, 0))
+            tk.Label(
+                inner,
+                text=f"📞 {slot.get('contact', '')}",
+                bg=card_bg,
+                fg="#166534",
+                font=("Microsoft YaHei UI", 9),
+                anchor="w",
+            ).pack(fill="x", pady=(2, 6))
+
+            # 卡片颜色只表示锁定/流程状态；主流程按钮始终保留。
+            # 绿色卡片仍可先接受复试通知，接受后由服务层切换到红色，
+            # 再显示“接受待录取”。右下角“移除”只负责放弃当前志愿。
+            action_text = "接受待录取" if slot.get("reexam_accepted_at") else "接受复试通知"
+            ttk.Button(
+                inner,
+                text=action_text,
+                style="Accent.TButton",
+                command=lambda idx=index: self._advance_locked_stage(idx),
+            ).pack(fill="x", pady=(4, 0))
+            btn_row = tk.Frame(inner, bg=card_bg)
+            btn_row.pack(fill="x", side="bottom", pady=(8, 0))
+            ttk.Button(
+                btn_row,
+                text="致电速记",
+                command=lambda s=slot: self._sync_to_right_notes(s),
+            ).pack(side="left", fill="x", expand=True)
+            ttk.Button(
+                btn_row,
+                text="移除",
+                command=lambda idx=index: self._reject_locked_slot(idx),
+            ).pack(side="right", padx=(8, 0))
 
         elif status == "admission":
             # 待录取紧急通知状态
@@ -757,9 +859,17 @@ class RecommendationManagementView:
             urgent_box.configure(highlightbackground="#fca5a5")
             urgent_box.pack(fill="x", pady=(0, 6))
 
+            try:
+                admission_deadline = effective_admission_deadline(self.settings, slot)
+                countdown_text = f"⚠️ 确认时限倒计时：{slot.get('remaining_confirm', '')}"
+                deadline_text = f"确认截止：{admission_deadline:%m-%d %H:%M}"
+            except ValueError:
+                admission_deadline = None
+                countdown_text = "⚠️ 确认时间待设置（可在右侧填写）"
+                deadline_text = "确认截止：待设置"
             timer_label = tk.Label(
                 urgent_box,
-                text=f"⚠️ 确认时限倒计时：{slot.get('remaining_confirm', '')}",
+                text=countdown_text,
                 bg="#fee2e2",
                 fg="#b91c1c",
                 font=("Microsoft YaHei UI", 10, "bold"),
@@ -769,7 +879,7 @@ class RecommendationManagementView:
             self.slot_time_labels[index] = timer_label
             tk.Label(
                 urgent_box,
-                text=f"确认截止：{effective_admission_deadline(self.settings, slot):%m-%d %H:%M}",
+                text=deadline_text,
                 bg="#fee2e2",
                 fg="#7f1d1d",
                 font=("Microsoft YaHei UI", 8),
@@ -785,17 +895,20 @@ class RecommendationManagementView:
                 anchor="w",
             ).pack(fill="x", pady=(2, 6))
 
+            ttk.Button(
+                inner,
+                text="🎉 接受待录取",
+                style="Accent.TButton",
+                command=lambda idx=index: self._accept_admission_now(idx),
+            ).pack(fill="x", pady=(4, 0))
             btn_row = tk.Frame(inner, bg=card_bg)
             btn_row.pack(fill="x", side="bottom", pady=(8, 0))
-
-            ttk.Button(btn_row, text="放弃/拒绝", command=lambda idx=index: self._reject_admission(idx)).pack(side="left")
             ttk.Button(
                 btn_row,
-                text="🎉 确认接受",
-                style="Accent.TButton",
-                command=lambda s=slot, idx=index: self._open_accept_dialog(s, idx),
-            ).pack(side="right")
-            ttk.Button(inner, text="致电速记 / 核实时限", command=lambda idx=index: self._admission_contact(idx)).pack(fill="x", pady=(4, 0))
+                text="致电速记",
+                command=lambda s=slot: self._sync_to_right_notes(s),
+            ).pack(side="left", fill="x", expand=True)
+            ttk.Button(btn_row, text="拒绝", command=lambda idx=index: self._reject_admission(idx)).pack(side="right", padx=(8, 0))
 
         elif status == "admitted":
             # 拟录取成功状态
@@ -960,6 +1073,10 @@ class RecommendationManagementView:
         ttk.Label(notes_box, text="拟报专业:").pack(anchor="w")
         self.right_major = ttk.Entry(notes_box)
         self.right_major.pack(fill="x", pady=(2, 6))
+        self.right_choice_timing = StageWindowInput(notes_box, lambda: self.settings, self.service.clock, "choice")
+        self.right_choice_timing.pack(fill="x", pady=(0, 6))
+        self.right_reexam_timing = StageWindowInput(notes_box, lambda: self.settings, self.service.clock, "reexam")
+        self.right_reexam_timing.pack(fill="x", pady=(0, 6))
         self.right_timing = OfferTimingInput(notes_box, lambda: self.settings, self.service.clock)
         self.right_timing.pack(fill="x", pady=(0, 6))
         self.right_accepted_label = ttk.Label(notes_box, text="", foreground="#15803d", font=("Microsoft YaHei UI", 9, "bold"))
@@ -1103,15 +1220,39 @@ class RecommendationManagementView:
             self.reload_data()
 
 
-    def _force_unlock_slot(self, slot_index: int):
+    def _reject_locked_slot(self, slot_index: int):
+        """统一处理锁定志愿的“拒绝”操作。
+
+        高校拒绝和本人放弃在看板上都归为同一个结果：该志愿结束，槽位
+        恢复为空闲。按钮文案保持中性，避免用户误以为这是一个只能由高校
+        发起的“解封”动作。
+        """
         slot = self.running_slots[slot_index]
         res = messagebox.askyesno(
-            "解封志愿确认",
-            f"招生办是否已在系统中明确拒绝了【{slot.get('school')}】的志愿？\n确认后该志愿槽位将立即恢复空闲状态，您可以立刻填报下一所意向高校！",
+            "拒绝志愿",
+            f"确定拒绝【{slot.get('school')}】的志愿吗？\n"
+            "无论是高校拒绝还是本人放弃，确认后该志愿都会结束，槽位将恢复空闲。",
             parent=self.left_parent.winfo_toplevel(),
         )
         if res:
-            self._run_action(lambda: self.service.unlock_slot_manually(slot_index))
+            # 拒绝/放弃才会清空志愿槽位；锁定到期的自动解锁由服务层保留
+            # 原学校并切换为绿色 unlocked 状态。
+            self._run_action(lambda: self.service.remove_slot(slot_index))
+
+    # 兼容旧代码/旧备份中仍可能引用的名称。
+    def _force_unlock_slot(self, slot_index: int):
+        return self._reject_locked_slot(slot_index)
+
+    def _advance_locked_stage(self, slot_index: int):
+        """锁定志愿的主按钮：直接按当前时刻接受复试通知。"""
+        slot = self.running_slots[slot_index]
+        if slot.get("reexam_accepted_at"):
+            return self._accept_admission_now(slot_index)
+        return self._run_action(lambda: self.service.accept_reexam(slot_index))
+
+    def _accept_admission_now(self, slot_index: int):
+        """直接按当前时刻接受待录取；精确时限从右侧设置读取。"""
+        return self._run_action(lambda: self.service.accept_admission(slot_index))
 
     def _open_accept_dialog(self, slot: dict, slot_index: int):
         dialog = tk.Toplevel(self.left_parent.winfo_toplevel())
@@ -1173,8 +1314,9 @@ class RecommendationManagementView:
     def _reject_admission(self, slot_index: int):
         slot = self.running_slots[slot_index]
         res = messagebox.askyesno(
-            "放弃待录取确认",
-            f"确定要放弃【{slot.get('school')}】的待录取通知吗？\n放弃后该名额将无法撤回，志愿槽位将重新空出。",
+            "拒绝志愿",
+            f"确定拒绝【{slot.get('school')}】的待录取吗？\n"
+            "无论是高校拒绝还是本人放弃，确认后该志愿都会结束，槽位将恢复空闲。",
             parent=self.left_parent.winfo_toplevel(),
         )
         if res:
@@ -1212,7 +1354,10 @@ class RecommendationManagementView:
         self._do_fill_slot(idle_idx, target_res)
 
     def _do_fill_slot(self, slot_index: int, res_item: dict):
-        if not messagebox.askyesno("登记已提交志愿", f"确认已在研招网提交【{res_item.get('school')}】？\n本软件将从现在起记录锁定倒计时，不会代替你向研招网提交志愿。", parent=self.left_parent):
+        title = "登记已提交志愿"
+        prompt = (f"确认已在研招网提交【{res_item.get('school')}】？\n"
+                  "本软件将从现在起记录锁定倒计时，不会代替你向研招网提交志愿。")
+        if not messagebox.askyesno(title, prompt, parent=self.left_parent):
             return
         if self._persist_note_draft() and self._run_action(lambda: self.service.fill_slot_from_reservoir(slot_index, res_item)):
             self._restore_right_notes()
@@ -1257,6 +1402,8 @@ class RecommendationManagementView:
         self.right_note_text.insert("1.0", notes.get("content", ""))
         self.right_major.delete(0, "end")
         self.right_major.insert(0, notes.get("major", ""))
+        self.right_choice_timing.set(notes)
+        self.right_reexam_timing.set(notes)
         self.right_timing.set(notes)
         accepted = notes.get("accepted_at")
         self.right_accepted_label.configure(text="状态：🎉 已确认接受待录取（拟录取达成）" if accepted else "")
@@ -1268,14 +1415,20 @@ class RecommendationManagementView:
                   self.right_note_text.get("1.0", "end-1c"))
         notes = self.service.export_data()["quick_contact_notes"]
         try:
-            details = {"major": self.right_major.get().strip(), **self.right_timing.get()}
+            details = {"major": self.right_major.get().strip(),
+                       **self.right_choice_timing.get(), **self.right_reexam_timing.get(),
+                       **self.right_timing.get()}
         except ValueError as exc:
             messagebox.showerror("志愿信息未保存", str(exc), parent=self.left_parent)
             return False
-        previous = {"major": notes.get("major", ""), **offer_fields(notes)}
+        previous = {"major": notes.get("major", ""), **stage_timing_fields(notes), **offer_fields(notes)}
         if values == tuple(notes.get(k, "") for k in ("current_school", "current_contact", "content")) and details == previous:
             return True
-        return self._run_action(lambda: self.service.save_right_note(*values, details=details), refresh=False)
+        # 只有右侧高校显示文本保持不变时才沿用选中对象；用户主动改写高校
+        # 名称时保存为独立速记，避免误写入原储备项。
+        target_override = notes.get("target") if values[0] == notes.get("current_school", "") else None
+        return self._run_action(lambda: self.service.save_right_note(*values, details=details,
+                                                                      target_override=target_override), refresh=False)
 
     def _delete_reservoir_item(self):
         selected = self.reservoir_tree.selection()
@@ -1286,34 +1439,21 @@ class RecommendationManagementView:
             self._run_action(lambda: self.service.delete_reservoir_item(selected[0]))
 
     def _record_admission(self, slot_index):
-        if not self._persist_note_draft():
-            return
-        self._load_snapshot()
-        dialog = tk.Toplevel(self.left_parent.winfo_toplevel())
-        dialog.title("登记收到待录取通知")
-        dialog.transient(self.left_parent.winfo_toplevel())
-        dialog.grab_set()
-        body = ttk.Frame(dialog, padding=16)
-        body.pack(fill="both", expand=True)
-        ttk.Label(body, text="请按高校通知填写确认开始时间与允许时长。").pack(anchor="w", pady=(0, 10))
-        timing = OfferTimingInput(body, lambda: self.settings, self.service.clock)
-        timing.pack(fill="x")
-        item = dict(self.running_slots[slot_index])
-        if item.get("offer_start_mode", "pending") == "pending":
-            item.update(offer_start_mode="fixed", offer_start_time=self.service.clock().isoformat(timespec="minutes"))
-        timing.set(item)
-        def save():
-            if self._run_action(lambda: self.service.receive_admission_from_rule(slot_index, timing.get())):
-                dialog.destroy()
-        ttk.Button(body, text="登记通知", command=save).pack(side="right", pady=(10, 0))
-        return dialog
+        # 兼容旧调用方：现在录取确认时间统一从右侧读取，按钮直接
+        # 使用当前时刻，不再弹出第二套录入窗口。
+        return self._accept_admission_now(slot_index)
+
+    def _record_reexam(self, slot_index):
+        # 兼容旧调用方：阶段窗口由右侧设置，流程按钮直接按当前时刻
+        # 接受复试通知并切换到红色待录取确认卡片。
+        return self._run_action(lambda: self.service.accept_reexam(slot_index))
+
+    def _confirm_reexam(self, slot_index):
+        return self._record_reexam(slot_index)
 
     def _admission_contact(self, slot_index):
+        """仅打开右侧记录，确认时限统一由右侧主动设置。"""
         self._sync_to_right_notes(self.running_slots[slot_index])
-        if messagebox.askyesno("核实待录取时限", "高校是否已明确延长确认时限？\n选择“是”登记新的截止时间，选择“否”继续在右侧速记。", parent=self.left_parent):
-            return DateTimeDialog(self.left_parent, "更新确认时限", "选择高校确认的新截止时间：",
-                                  self.running_slots[slot_index]["deadline"],
-                                  lambda value: self._run_action(lambda: self.service.update_admission_deadline(slot_index, value)))
 
     def _update_clock_labels(self, now=None):
         now = now or self.service.clock()
@@ -1324,6 +1464,9 @@ class RecommendationManagementView:
         complete = "admitted" in statuses
         admission_open = parse_time(settings["admission_open_time"]) if settings.get("admission_open_time") else None
         admission_close = parse_time(settings["admission_close_time"]) if settings.get("admission_close_time") else None
+        choice_close = parse_time(settings["choice_close_time"]) if settings.get("choice_close_time") else None
+        reexam_open = parse_time(settings["reexam_open_time"]) if settings.get("reexam_open_time") else None
+        reexam_close = parse_time(settings["reexam_close_time"]) if settings.get("reexam_close_time") else None
         text, remaining = timeline_countdown(settings, now)
         if complete:
             text = "已确认唯一待录取，推免流程已结束，其他志愿已归档。"
@@ -1339,6 +1482,12 @@ class RecommendationManagementView:
             badge, bg, fg = "待录取确认时间段已结束", "#f1f5f9", "#64748b"
         elif admission_open and now >= admission_open:
             badge, bg, fg = "🔥 待录取确认中", "#fee2e2", "#dc2626"
+        elif reexam_close and now >= reexam_close:
+            badge, bg, fg = "复试通知确认时间段已结束", "#f1f5f9", "#64748b"
+        elif reexam_open and now >= reexam_open:
+            badge, bg, fg = "阶段三：接受复试通知确认中", "#ede9fe", "#6d28d9"
+        elif choice_close and now >= choice_close:
+            badge, bg, fg = "志愿填报时间段已结束", "#f1f5f9", "#64748b"
         elif now >= choice:
             badge, bg, fg = "阶段二：志愿填报与复试确认中", "#dbeafe", "#1d4ed8"
         elif now >= reg:
@@ -1346,9 +1495,10 @@ class RecommendationManagementView:
         else:
             badge, bg, fg = "准备期：整理意向志愿", "#f1f5f9", "#64748b"
         self.stage_badge.configure(text=f" {badge} ", bg=bg, fg=fg)
+        stage3_time = f"{reexam_open:%m.%d %H:%M}" if reexam_open else "时间待设置"
         steps = [(f"① 系统注册 ({reg:%m.%d %H:%M})", now >= reg),
                  (f"② 志愿填报 ({choice:%m.%d %H:%M})", now >= choice),
-                 (f"③ {settings['lock_hours']}h锁定与复试", any(s != "idle" for s in statuses)),
+                 (f"③ {settings['lock_hours']}h锁定与复试 ({stage3_time})", any(s != "idle" for s in statuses) or bool(reexam_open and now >= reexam_open)),
                  (f"④ 待录取确认 ({admission_open:%m.%d %H:%M})" if admission_open else "④ 待录取确认 (时间待设置)",
                   bool(admission_open and now >= admission_open) or complete)]
         for label, (name, active) in zip(self.step_labels, steps):
@@ -1358,9 +1508,15 @@ class RecommendationManagementView:
             if slot["status"] == "locked":
                 seconds = (parse_time(slot["unlock_at"]) - now).total_seconds()
                 label.configure(text=f"剩余锁定时长：{minute_duration_text(seconds)}")
+            elif slot["status"] == "unlocked":
+                label.configure(text="✓ 已解锁，可修改后重新提交")
             elif slot["status"] == "admission":
-                seconds = (effective_admission_deadline(settings, slot) - now).total_seconds()
-                label.configure(text="⚠️ 确认时限已过，请核实" if seconds <= 0 else f"⚠️ 确认时限倒计时：{minute_duration_text(seconds)}")
+                try:
+                    seconds = (effective_admission_deadline(settings, slot) - now).total_seconds()
+                except ValueError:
+                    label.configure(text="⚠️ 确认时间待设置")
+                else:
+                    label.configure(text="⚠️ 确认时限已过，请核实" if seconds <= 0 else f"⚠️ 确认时限倒计时：{minute_duration_text(seconds)}")
 
     def start_recommendation_timer(self):
         if self._timer_job is None:

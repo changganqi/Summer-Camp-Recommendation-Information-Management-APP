@@ -48,8 +48,8 @@ AI 一键录入可读取通知链接或正文，提取学校、学院、报名�
 
 ## 下载与安装
 
-- Windows：[SummerCampPlannerSetup.exe](https://github.com/changganqi/Summer-Camp-Recommendation-Information-Management-APP/releases/download/v1.5.1/SummerCampPlannerSetup.exe)
-- macOS：[SummerCampPlanner-macOS.dmg](https://github.com/changganqi/Summer-Camp-Recommendation-Information-Management-APP/releases/download/v1.5.1/SummerCampPlanner-macOS.dmg)
+- Windows：[SummerCampPlannerSetup.exe](https://github.com/changganqi/Summer-Camp-Recommendation-Information-Management-APP/releases/download/v1.5.3/SummerCampPlannerSetup.exe)
+- macOS：[SummerCampPlanner-macOS.dmg](https://github.com/changganqi/Summer-Camp-Recommendation-Information-Management-APP/releases/download/v1.5.3/SummerCampPlanner-macOS.dmg)
 
 Windows 下载后运行安装包，按提示完成安装。macOS 下载 DMG 后，将“夏令营日程助手.app”拖入 `Applications`。首次打开若提示无法验证开发者，可在 Finder 中右键点击应用并选择“打开”。更多说明见 [macOS 使用说明](docs/macos使用说明.md)。
 
@@ -67,4 +67,4 @@ python -X utf8 build_release.py
 
 macOS 由 GitHub Actions 在 `macos-14` 环境构建 DMG。构建仓库只保存源码、工作流、资源和文档，不提交本机数据库、配置文件、个人资料、密钥或构建缓存。
 
-激活码见小黄鱼号：满天星的。
+对外安装包和使用说明见 [Summer-Camp-Recommendation-Information-Management-APP](https://github.com/changganqi/Summer-Camp-Recommendation-Information-Management-APP)。

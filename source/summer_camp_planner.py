@@ -10437,15 +10437,20 @@ class SummerCampPlanner(tk.Tk):
         self.minimize_to_tray()
 
     def minimize_to_tray(self) -> None:
-        """最小化隐藏到后台系统托盘"""
+        """最小化到后台，同时保留任务栏入口。
+
+        旧实现直接 withdraw()，一旦系统托盘图标被 Windows 收进隐藏区域
+        或 pystray 初始化失败，窗口就会“仍在后台但任务栏找不到”。
+        iconify() 会持续保留任务栏按钮，托盘图标则作为额外快捷入口。
+        """
         if self.recommendation_view:
             self.recommendation_view._persist_note_draft()
-        self.withdraw()
         self._ensure_tray_icon()
+        self.iconify()
         from recommendation_alerts import send_windows_toast
         send_windows_toast(
-            "夏令营与推免助手已转入后台运行",
-            "推免倒计时与待录取提醒将持续生效。双击托盘图标可重新打开，右键可完全退出。"
+            "夏令营与推免助手已最小化",
+            "推免倒计时与待录取提醒将持续生效。可从任务栏或托盘图标恢复窗口。"
         )
 
     def restore_from_tray(self) -> None:
